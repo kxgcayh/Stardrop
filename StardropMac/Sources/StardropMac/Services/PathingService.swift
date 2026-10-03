@@ -24,6 +24,10 @@ public final class PathingService {
         homeURL.appendingPathComponent("Logs", isDirectory: true)
     }
 
+    public var separatorsURL: URL {
+        homeURL.appendingPathComponent("Separators", isDirectory: true)
+    }
+
     public var smapiLogURL: URL {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return home.appendingPathComponent(".config/StardewValley/ErrorLogs/SMAPI-latest.txt")
@@ -79,7 +83,7 @@ public final class PathingService {
     }
 
     public func ensureDirectoriesExist() {
-        let dirs = [homeURL, profilesURL, selectedModsURL, logsURL]
+        let dirs = [homeURL, profilesURL, selectedModsURL, logsURL, separatorsURL]
         for dir in dirs {
             try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         }

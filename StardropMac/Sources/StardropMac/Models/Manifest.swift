@@ -1,5 +1,36 @@
 import Foundation
 
+struct DynamicCodingKey: CodingKey {
+    var stringValue: String
+    var intValue: Int?
+
+    init?(stringValue: String) {
+        self.stringValue = stringValue
+    }
+
+    init?(intValue: Int) {
+        self.intValue = intValue
+        self.stringValue = "\(intValue)"
+    }
+}
+
+extension KeyedDecodingContainer where K == DynamicCodingKey {
+    func decodeCaseInsensitive<T: Decodable>(_ type: T.Type, forKey keyName: String) -> T? {
+        if let exactKey = DynamicCodingKey(stringValue: keyName),
+           let value = try? decode(type, forKey: exactKey) {
+            return value
+        }
+        for key in allKeys {
+            if key.stringValue.caseInsensitiveCompare(keyName) == .orderedSame {
+                if let value = try? decode(type, forKey: key) {
+                    return value
+                }
+            }
+        }
+        return nil
+    }
+}
+
 public struct ManifestDependency: Codable, Identifiable, Hashable {
     public var id: String { uniqueID }
     public let uniqueID: String
@@ -19,10 +50,10 @@ public struct ManifestDependency: Codable, Identifiable, Hashable {
     }
 
     public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.uniqueID = try container.decode(String.self, forKey: .uniqueID)
-        self.minimumVersion = try container.decodeIfPresent(String.self, forKey: .minimumVersion)
-        self.isRequired = try container.decodeIfPresent(Bool.self, forKey: .isRequired) ?? true
+        let container = try decoder.container(keyedBy: DynamicCodingKey.self)
+        self.uniqueID = container.decodeCaseInsensitive(String.self, forKey: "UniqueID") ?? ""
+        self.minimumVersion = container.decodeCaseInsensitive(String.self, forKey: "MinimumVersion")
+        self.isRequired = container.decodeCaseInsensitive(Bool.self, forKey: "IsRequired") ?? true
     }
 }
 
@@ -33,6 +64,17 @@ public struct ManifestContentPackFor: Codable, Hashable {
     enum CodingKeys: String, CodingKey {
         case uniqueID = "UniqueID"
         case minimumVersion = "MinimumVersion"
+    }
+
+    public init(uniqueID: String, minimumVersion: String? = nil) {
+        self.uniqueID = uniqueID
+        self.minimumVersion = minimumVersion
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: DynamicCodingKey.self)
+        self.uniqueID = container.decodeCaseInsensitive(String.self, forKey: "UniqueID") ?? ""
+        self.minimumVersion = container.decodeCaseInsensitive(String.self, forKey: "MinimumVersion")
     }
 }
 
@@ -73,24 +115,24 @@ public struct ModManifest: Codable, Hashable {
     }
 
     public init(from decoder: Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.name = try container.decodeIfPresent(String.self, forKey: .name) ?? "Unnamed Mod"
-        self.author = try container.decodeIfPresent(String.self, forKey: .author) ?? "Unknown Author"
-        self.version = try container.decodeIfPresent(String.self, forKey: .version) ?? "1.0.0"
-        self.description = try container.decodeIfPresent(String.self, forKey: .description)
-        self.uniqueID = try container.decodeIfPresent(String.self, forKey: .uniqueID) ?? UUID().uuidString
-        self.entryDll = try container.decodeIfPresent(String.self, forKey: .entryDll)
+        let container = try decoder.container(keyedBy: DynamicCodingKey.self)
+        self.name = container.decodeCaseInsensitive(String.self, forKey: "Name") ?? "Unnamed Mod"
+        self.author = container.decodeCaseInsensitive(String.self, forKey: "Author") ?? "Unknown Author"
+        self.version = container.decodeCaseInsensitive(String.self, forKey: "Version") ?? "1.0.0"
+        self.description = container.decodeCaseInsensitive(String.self, forKey: "Description")
+        self.uniqueID = container.decodeCaseInsensitive(String.self, forKey: "UniqueID") ?? UUID().uuidString
+        self.entryDll = container.decodeCaseInsensitive(String.self, forKey: "EntryDll")
 
         // UpdateKeys can be [String], a single String, or absent
-        if let keysArray = try? container.decode([String].self, forKey: .updateKeys) {
+        if let keysArray = container.decodeCaseInsensitive([String].self, forKey: "UpdateKeys") {
             self.updateKeys = keysArray
-        } else if let singleKey = try? container.decode(String.self, forKey: .updateKeys) {
+        } else if let singleKey = container.decodeCaseInsensitive(String.self, forKey: "UpdateKeys") {
             self.updateKeys = singleKey.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
         } else {
             self.updateKeys = []
         }
 
-        self.dependencies = try container.decodeIfPresent([ManifestDependency].self, forKey: .dependencies) ?? []
-        self.contentPackFor = try container.decodeIfPresent(ManifestContentPackFor.self, forKey: .contentPackFor)
+        self.dependencies = container.decodeCaseInsensitive([ManifestDependency].self, forKey: "Dependencies") ?? []
+        self.contentPackFor = container.decodeCaseInsensitive(ManifestContentPackFor.self, forKey: "ContentPackFor")
     }
 }

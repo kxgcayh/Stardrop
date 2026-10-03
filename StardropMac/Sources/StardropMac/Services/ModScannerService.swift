@@ -9,6 +9,12 @@ public final class ModScannerService {
         return decoder
     }()
 
+    public static let coreModIds: Set<String> = [
+        "smapi.consolecommands",
+        "smapi.errorhandler",
+        "smapi.savebackup"
+    ]
+
     public func scanMods(in modsFolder: URL, enabledIds: Set<String>? = nil) -> [Mod] {
         var results: [Mod] = []
         let fileManager = FileManager.default
@@ -19,12 +25,14 @@ public final class ModScannerService {
 
         scanDirectory(modsFolder, results: &results)
 
-        // Apply enabled state if provided
-        if let enabledIds = enabledIds {
-            let lowercasedEnabled = Set(enabledIds.map { $0.lowercased() })
-            for i in 0..<results.count {
-                let id = results[i].manifest.uniqueID.lowercased()
-                results[i].isEnabled = lowercasedEnabled.contains(id)
+        // Apply enabled state if provided, but core SMAPI mods are always enabled
+        let lowercasedEnabled = enabledIds.map { Set($0.map { $0.lowercased() }) }
+        for i in 0..<results.count {
+            let id = results[i].manifest.uniqueID.lowercased()
+            if Self.coreModIds.contains(id) {
+                results[i].isEnabled = true
+            } else if let enabledSet = lowercasedEnabled {
+                results[i].isEnabled = enabledSet.contains(id)
             }
         }
 

@@ -53,6 +53,22 @@ public struct MainView: View {
                         .foregroundStyle(.secondary)
                     Text("\(state.totalCount) Total")
                         .foregroundStyle(.secondary)
+
+                    if state.availableUpdatesCount > 0 {
+                        Text("·")
+                            .foregroundStyle(.secondary)
+                        Button {
+                            withAnimation {
+                                state.selectedCategory = (state.selectedCategory == .updatableOnly) ? .allMods : .updatableOnly
+                            }
+                        } label: {
+                            Text("\(state.availableUpdatesCount) Updates")
+                                .fontWeight(.bold)
+                                .foregroundStyle(.orange)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Click to filter by available updates")
+                    }
                 }
                 .font(.caption)
                 .padding(.horizontal, 10)
@@ -61,8 +77,25 @@ public struct MainView: View {
             }
 
             ToolbarItemGroup(placement: .primaryAction) {
-                // Bulk Mod Actions Menu
+                // Bulk Mod & Separator Actions Menu
                 Menu {
+                    Button("New Separator...") {
+                        state.promptNewSeparator()
+                    }
+                    Divider()
+                    Button(state.areAllSeparatorsExpanded ? "Collapse All Separators" : "Expand All Separators") {
+                        if state.areAllSeparatorsExpanded {
+                            state.collapseAllSeparators()
+                        } else {
+                            state.expandAllSeparators()
+                        }
+                    }
+                    .disabled(state.separators.isEmpty)
+
+                    Button("Auto-generate Separators from Folders") {
+                        state.autoGenerateSeparatorsFromFolders()
+                    }
+                    Divider()
                     Button("Enable All Mods") {
                         state.enableAllMods()
                     }
@@ -72,7 +105,7 @@ public struct MainView: View {
                 } label: {
                     Image(systemName: "checklist")
                 }
-                .help("Bulk Mod Actions (Enable / Disable All Mods)")
+                .help("Bulk Mod & Separator Actions")
 
                 Button {
                     state.refreshMods()
@@ -91,10 +124,11 @@ public struct MainView: View {
                             .controlSize(.small)
                     } else {
                         Image(systemName: "arrow.triangle.2.circlepath")
+                            .foregroundStyle(state.availableUpdatesCount > 0 ? Color.orange : Color.primary)
                     }
                 }
                 .disabled(state.isCheckingUpdates)
-                .help(state.isCheckingUpdates ? "Checking for mod updates..." : "Check for Mod Updates (⌘U)")
+                .help(state.isCheckingUpdates ? "Checking for mod updates..." : (state.availableUpdatesCount > 0 ? "\(state.availableUpdatesCount) mod update\(state.availableUpdatesCount == 1 ? "" : "s") available (⌘U)" : "Check for Mod Updates (⌘U)"))
 
                 Button {
                     state.isNexusPresented = true
@@ -145,6 +179,12 @@ public struct MainView: View {
                 ConfigEditorSheet(mod: mod)
             }
         }
+        .sheet(isPresented: $state.isNewSeparatorPresented) {
+            NewSeparatorSheet(state: state)
+        }
+        .sheet(item: $state.separatorToRename) { separator in
+            RenameSeparatorSheet(state: state, separator: separator)
+        }
         .onChange(of: state.launcher.launchError) { _, error in
             showingErrorAlert = error != nil
         }
@@ -179,9 +219,10 @@ public struct MainView: View {
             state.disableAllMods()
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleSelectedMod)) { _ in
-            if let mod = state.selectedMod {
-                state.toggleMod(mod)
-            }
+            state.toggleSelectedMod()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .newSeparator)) { _ in
+            state.promptNewSeparator()
         }
         .onReceive(NotificationCenter.default.publisher(for: .launchSmapi)) { _ in
             state.launchGame()

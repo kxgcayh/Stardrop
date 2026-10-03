@@ -73,62 +73,26 @@ public struct SidebarView: View {
                 }
             }
 
-            Section {
+            Section("Profiles") {
                 ForEach(state.profiles) { profile in
-                    let isActive = state.activeProfile.id == profile.id
-                    HStack {
-                        Label {
-                            Text(profile.name)
-                                .fontWeight(isActive ? .semibold : .regular)
-                        } icon: {
-                            Image(systemName: isActive ? "person.crop.circle.fill" : "person.crop.circle")
-                                .foregroundStyle(isActive ? .blue : .secondary)
-                        }
-
-                        Spacer()
-
-                        Text("\(profile.enabledModIds.count)")
-                            .font(.caption2)
-                            .foregroundStyle(isActive ? .blue : .secondary)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(isActive ? Color.blue.opacity(0.15) : Color.secondary.opacity(0.12)))
-
-                        if isActive {
-                            Image(systemName: "checkmark")
-                                .font(.caption.bold())
-                                .foregroundStyle(.blue)
-                        }
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        state.selectProfile(profile)
-                    }
-                    .contextMenu {
-                        Button("Duplicate Profile") {
-                            state.duplicateProfile(profile)
-                        }
-                        if !profile.isProtected {
-                            Divider()
-                            Button("Delete Profile", role: .destructive) {
-                                state.deleteProfile(profile)
-                            }
-                        }
-                    }
+                    ProfileSidebarRow(state: state, profile: profile)
                 }
-            } header: {
-                HStack {
-                    Text("Profiles")
-                    Spacer()
-                    Button {
-                        state.isNewProfilePresented = true
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.caption)
+
+                Button {
+                    state.isNewProfilePresented = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "plus.circle")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.blue)
+                        Text("New Profile...")
+                            .font(.system(size: 13))
+                            .foregroundStyle(.blue)
                     }
-                    .buttonStyle(.plain)
-                    .help("Create New Profile")
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 6)
                 }
+                .buttonStyle(.plain)
             }
 
             Section("Tools") {
@@ -207,5 +171,74 @@ public struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
+    }
+}
+
+public struct ProfileSidebarRow: View {
+    @ObservedObject var state: AppState
+    let profile: Profile
+    @State private var isHovered: Bool = false
+
+    public var body: some View {
+        let isActive = state.activeProfile.id == profile.id
+
+        Button {
+            state.selectProfile(profile)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: isActive ? "person.crop.circle.fill" : "person.crop.circle")
+                    .font(.system(size: 14))
+                    .foregroundStyle(isActive ? Color.blue : Color.secondary)
+                    .frame(width: 16)
+
+                Text(profile.name)
+                    .font(.system(size: 13, weight: isActive ? .semibold : .regular))
+                    .foregroundStyle(isActive ? Color.primary : (isHovered ? Color.primary : Color.secondary))
+                    .lineLimit(1)
+
+                Spacer()
+
+                Text("\(profile.enabledModIds.count)")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(isActive ? Color.blue : Color.secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule().fill(isActive ? Color.blue.opacity(0.18) : (isHovered ? Color.secondary.opacity(0.18) : Color.secondary.opacity(0.12)))
+                    )
+
+                if isActive {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.blue)
+                }
+            }
+            .padding(.vertical, 5)
+            .padding(.horizontal, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isActive ? Color.blue.opacity(0.12) : (isHovered ? Color.secondary.opacity(0.1) : Color.clear))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.12)) {
+                isHovered = hovering
+            }
+        }
+        .listRowInsets(EdgeInsets(top: 2, leading: 6, bottom: 2, trailing: 6))
+        .listRowBackground(Color.clear)
+        .contextMenu {
+            Button("Duplicate Profile") {
+                state.duplicateProfile(profile)
+            }
+            if !profile.isProtected {
+                Divider()
+                Button("Delete Profile", role: .destructive) {
+                    state.deleteProfile(profile)
+                }
+            }
+        }
     }
 }

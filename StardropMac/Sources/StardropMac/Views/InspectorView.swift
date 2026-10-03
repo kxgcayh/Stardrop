@@ -20,6 +20,8 @@ public struct InspectorView: View {
                             ))
                             .toggleStyle(.switch)
                             .labelsHidden()
+                            .disabled(mod.isCoreSMAPI)
+                            .help(mod.isCoreSMAPI ? "Core SMAPI components are required and cannot be disabled" : (mod.isEnabled ? "Disable mod" : "Enable mod"))
                         }
 
                         Text(mod.name)
@@ -34,12 +36,24 @@ public struct InspectorView: View {
 
                     // Quick Info Grid
                     VStack(alignment: .leading, spacing: 10) {
+                        if mod.isCoreSMAPI {
+                            HStack {
+                                Text("Type")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 80, alignment: .leading)
+                                Text("Core SMAPI Component")
+                                    .font(.caption.bold())
+                                    .foregroundStyle(.blue)
+                            }
+                        }
+
                         infoRow(label: "Version", value: mod.version)
                         infoRow(label: "Unique ID", value: mod.id)
 
                         if mod.hasUpdate {
                             HStack {
-                                Text("Update")
+                                Text("New Version")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                                     .frame(width: 80, alignment: .leading)
@@ -51,6 +65,48 @@ public struct InspectorView: View {
                     }
                     .padding(12)
                     .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary.opacity(0.4)))
+
+                    if mod.hasUpdate {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Image(systemName: "arrow.up.circle.fill")
+                                    .foregroundStyle(.orange)
+                                    .font(.title3)
+
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text("Update Available")
+                                        .font(.subheadline.bold())
+                                        .foregroundStyle(.orange)
+                                    Text("v\(mod.version) → v\(mod.suggestedVersion ?? "")")
+                                        .font(.caption.monospaced())
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Spacer()
+                            }
+
+                            if let updateURL = mod.updateURL ?? mod.nexusURL {
+                                Button {
+                                    NSWorkspace.shared.open(updateURL)
+                                } label: {
+                                    Label("Download Update", systemImage: "arrow.down.circle.fill")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(.orange)
+                                .controlSize(.regular)
+                            }
+                        }
+                        .padding(12)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.orange.opacity(0.12))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
+                                )
+                        )
+                    }
 
                     // Description
                     VStack(alignment: .leading, spacing: 6) {

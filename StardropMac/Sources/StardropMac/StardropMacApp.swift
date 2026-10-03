@@ -48,6 +48,13 @@ struct StardropMacApp: App {
 
                 Divider()
 
+                Button("New Separator...") {
+                    NotificationCenter.default.post(name: .newSeparator, object: nil)
+                }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+
+                Divider()
+
                 Button("Refresh Mod List") {
                     NotificationCenter.default.post(name: .refreshMods, object: nil)
                 }
@@ -106,4 +113,5 @@ extension Notification.Name {
     static let enableAllMods = Notification.Name("StardropEnableAllMods")
     static let disableAllMods = Notification.Name("StardropDisableAllMods")
     static let toggleSelectedMod = Notification.Name("StardropToggleSelectedMod")
+    static let newSeparator = Notification.Name("StardropNewSeparator")
 }

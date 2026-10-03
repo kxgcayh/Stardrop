@@ -38,9 +38,24 @@ public struct ModEntryVersion: Codable {
     public let version: String?
     public let url: String?
 
-    enum CodingKeys: String, CodingKey {
-        case version = "Version"
-        case url = "Url"
+    struct AnyKey: CodingKey {
+        var stringValue: String
+        init?(stringValue: String) { self.stringValue = stringValue }
+        var intValue: Int? { nil }
+        init?(intValue: Int) { nil }
+    }
+
+    public init(version: String? = nil, url: String? = nil) {
+        self.version = version
+        self.url = url
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: AnyKey.self)
+        self.version = container.allKeys.first(where: { $0.stringValue.caseInsensitiveCompare("version") == .orderedSame })
+            .flatMap { try? container.decode(String.self, forKey: $0) }
+        self.url = container.allKeys.first(where: { $0.stringValue.caseInsensitiveCompare("url") == .orderedSame })
+            .flatMap { try? container.decode(String.self, forKey: $0) }
     }
 }
 
@@ -48,9 +63,32 @@ public struct ModEntry: Codable {
     public let id: String
     public let suggestedUpdate: ModEntryVersion?
 
-    enum CodingKeys: String, CodingKey {
-        case id = "Id"
-        case suggestedUpdate = "SuggestedUpdate"
+    struct AnyKey: CodingKey {
+        var stringValue: String
+        init?(stringValue: String) { self.stringValue = stringValue }
+        var intValue: Int? { nil }
+        init?(intValue: Int) { nil }
+    }
+
+    public init(id: String, suggestedUpdate: ModEntryVersion? = nil) {
+        self.id = id
+        self.suggestedUpdate = suggestedUpdate
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: AnyKey.self)
+        let idKey = container.allKeys.first(where: { $0.stringValue.caseInsensitiveCompare("id") == .orderedSame })
+        if let idKey = idKey, let decodedId = try? container.decode(String.self, forKey: idKey) {
+            self.id = decodedId
+        } else {
+            self.id = ""
+        }
+        let updateKey = container.allKeys.first(where: { $0.stringValue.caseInsensitiveCompare("suggestedUpdate") == .orderedSame })
+        if let updateKey = updateKey {
+            self.suggestedUpdate = try? container.decode(ModEntryVersion.self, forKey: updateKey)
+        } else {
+            self.suggestedUpdate = nil
+        }
     }
 }
 

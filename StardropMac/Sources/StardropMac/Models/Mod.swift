@@ -50,6 +50,10 @@ public struct Mod: Identifiable, Hashable {
         return suggested != manifest.version
     }
 
+    public var isCoreSMAPI: Bool {
+        ModScannerService.coreModIds.contains(id.lowercased())
+    }
+
     public init(
         manifest: ModManifest,
         directoryURL: URL,
