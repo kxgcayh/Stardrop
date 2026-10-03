@@ -333,3 +333,8 @@ ASALocalRun/
 # Local History for Visual Studio
 .localhistory/
 
+# macOS & Swift
+.DS_Store
+.build/
+StardropMac/.build/
+StardropMac/build/

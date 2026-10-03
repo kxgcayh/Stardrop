@@ -1,0 +1,75 @@
+import Foundation
+
+public final class ProfileService {
+    public static let shared = ProfileService()
+
+    private let pathing = PathingService.shared
+    private let jsonDecoder = JSONDecoder()
+    private let jsonEncoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return encoder
+    }()
+
+    public func loadProfiles() -> [Profile] {
+        pathing.ensureDirectoriesExist()
+
+        let folder = pathing.profilesURL
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: folder,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        ) else {
+            return [defaultProfile()]
+        }
+
+        var profiles: [Profile] = []
+        for file in files where file.pathExtension.lowercased() == "json" {
+            if let data = try? Data(contentsOf: file),
+               let profile = try? jsonDecoder.decode(Profile.self, from: data) {
+                profiles.append(profile)
+            }
+        }
+
+        if profiles.isEmpty {
+            let def = defaultProfile()
+            saveProfile(def)
+            profiles.append(def)
+        }
+
+        return profiles.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    public func defaultProfile() -> Profile {
+        Profile(name: "Default", isProtected: true, enabledModIds: [])
+    }
+
+    public func saveProfile(_ profile: Profile) {
+        pathing.ensureDirectoriesExist()
+
+        let fileURL = pathing.profilesURL.appendingPathComponent("\(profile.name).json")
+        do {
+            let data = try jsonEncoder.encode(profile)
+            try data.write(to: fileURL, options: .atomic)
+        } catch {
+            print("Failed to save profile \(profile.name): \(error)")
+        }
+    }
+
+    public func deleteProfile(_ profile: Profile) {
+        guard !profile.isProtected else { return }
+        let fileURL = pathing.profilesURL.appendingPathComponent("\(profile.name).json")
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+
+    public func duplicateProfile(_ profile: Profile, newName: String) -> Profile {
+        let copy = Profile(
+            name: newName,
+            isProtected: false,
+            sourceId: nil,
+            enabledModIds: profile.enabledModIds
+        )
+        saveProfile(copy)
+        return copy
+    }
+}
