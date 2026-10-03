@@ -11,11 +11,10 @@ A 100% native macOS mod manager for [Stardew Valley](https://www.stardewvalley.n
 - Fluid 120Hz ProMotion animations, native physics, and kinetic overscroll bounce.
 - Translucent sidebar materials (`.sidebar`), native sheets, alerts, and system inspectors.
 
-### 📦 Center-View Collapsible Mod Groups
-- All mods are organized directly in the center view into collapsible/expandable mod group sections.
-- One-click **Expand All** and **Collapse All** toolbar controls.
-- Batch group actions: **Enable All** / **Disable All** per group.
-- Perfectly aligned table layout with centered enabled/disabled toggles, mod author, version badges, and update notices.
+### 📋 Clean & Aligned Mod Table
+- Direct, unified mod list with centered enabled/disabled toggles.
+- Clean layout with author, version tags, update indicators, and direct action shortcuts.
+- Smooth scrolling and instant selection of mods with zero overhead.
 
 ### 🌐 Official Nexus Mods API Integration
 - Connect your Nexus Mods account directly via your Personal API Key.
@@ -23,6 +22,11 @@ A 100% native macOS mod manager for [Stardew Valley](https://www.stardewvalley.n
 - Automatic detection of **Nexus Premium** membership status.
 - Accessible from the **Sidebar ("Services")**, **Top Toolbar** (globe icon), **App Settings (`⌘,`)**, and macOS Menu Bar (`⇧⌘N`).
 - Secure local storage conforming to Stardrop's `Settings.json` schema.
+
+### 🔄 Mod Update Engine (Nexus, GitHub, CurseForge)
+- **Automatic Background Check**: Asynchronously checks for newer versions on startup using the official SMAPI mod update API (`smapi.io/api/v3.0/mods`).
+- **Manual Check**: One-click check via the top toolbar button, macOS menu bar (`⌘U`), or the sidebar Tools section.
+- **Visual Status**: Shows orange `Update [Version]` pills directly in the mod table and badges the **Updates** category in the sidebar.
 
 ### 👤 Profile Management
 - Maintain distinct profiles for different farms, challenge runs, or multiplayer setups.
@@ -48,6 +52,7 @@ A 100% native macOS mod manager for [Stardew Valley](https://www.stardewvalley.n
 | Shortcut | Action |
 | :--- | :--- |
 | `⌘R` | **Launch Game** with SMAPI |
+| `⌘U` | **Check for Mod Updates** |
 | `⌘,` | Open **Settings** |
 | `⇧⌘N` | Open **Nexus Mods Account** sheet |
 | `⌘S` | Toggle Sidebar |
@@ -112,6 +117,7 @@ StardropMac/
 │       │   ├── ModScannerService.swift      # Manifest scanner & parser
 │       │   ├── SMAPILauncherService.swift   # Symlink manager & process launcher
 │       │   ├── NexusService.swift           # Nexus Mods REST API client
+│       │   ├── ModUpdateService.swift       # SMAPI mod update engine
 │       │   ├── PathingService.swift         # Path resolution (Steam, GOG, App Support)
 │       │   ├── ProfileService.swift         # Profile load/save
 │       │   └── SettingsService.swift        # Settings.json persistence
@@ -120,7 +126,7 @@ StardropMac/
 │       └── Views/
 │           ├── MainView.swift               # Root NavigationSplitView & Toolbar
 │           ├── SidebarView.swift            # Categories, Profiles, Tools, Services
-│           ├── ModTableView.swift           # Center collapsible mod groups & table
+│           ├── ModTableView.swift           # Center unified mod table
 │           ├── InspectorView.swift          # Mod inspector & details pane
 │           ├── NexusAccountSheet.swift      # Nexus API connection & status modal
 │           ├── AboutSheet.swift             # Native About & diagnostics dialog

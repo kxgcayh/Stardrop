@@ -16,7 +16,7 @@ public struct InspectorView: View {
                             Spacer()
                             Toggle("", isOn: Binding(
                                 get: { mod.isEnabled },
-                                set: { _ in state.toggleMod(mod) }
+                                set: { newValue in state.setModEnabled(mod, isEnabled: newValue) }
                             ))
                             .toggleStyle(.switch)
                             .labelsHidden()
@@ -36,10 +36,6 @@ public struct InspectorView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         infoRow(label: "Version", value: mod.version)
                         infoRow(label: "Unique ID", value: mod.id)
-
-                        if let group = mod.groupName {
-                            infoRow(label: "Group", value: group)
-                        }
 
                         if mod.hasUpdate {
                             HStack {
@@ -67,28 +63,102 @@ public struct InspectorView: View {
                     }
 
                     // Dependencies
-                    if !mod.manifest.dependencies.isEmpty {
+                    let deps = mod.manifest.allDependencies
+                    if !deps.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("Dependencies (\(mod.manifest.dependencies.count))")
+                            Text("Dependencies (\(deps.count))")
                                 .font(.headline)
 
                             VStack(spacing: 6) {
-                                ForEach(mod.manifest.dependencies) { dep in
-                                    HStack {
-                                        Image(systemName: dep.isRequired ? "exclamationmark.circle.fill" : "info.circle")
-                                            .foregroundStyle(dep.isRequired ? .orange : .secondary)
-                                            .font(.caption)
-                                        Text(dep.uniqueID)
-                                            .font(.caption)
-                                            .lineLimit(1)
+                                ForEach(deps) { dep in
+                                    let isDepInstalled = isInstalled(dependencyId: dep.uniqueID)
+                                    let matchedMod = installedMod(for: dep.uniqueID)
+
+                                    HStack(spacing: 8) {
+                                        // Checked and green when required and installed
+                                        if dep.isRequired {
+                                            if isDepInstalled {
+                                                Image(systemName: "checkmark.circle.fill")
+                                                    .foregroundStyle(Color.green)
+                                                    .font(.caption)
+                                            } else {
+                                                Image(systemName: "exclamationmark.triangle.fill")
+                                                    .foregroundStyle(Color.red)
+                                                    .font(.caption)
+                                            }
+                                        } else {
+                                            if isDepInstalled {
+                                                Image(systemName: "checkmark.circle")
+                                                    .foregroundStyle(Color.secondary)
+                                                    .font(.caption)
+                                            } else {
+                                                Image(systemName: "info.circle")
+                                                    .foregroundStyle(Color.secondary)
+                                                    .font(.caption)
+                                            }
+                                        }
+
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            if let matched = matchedMod, matched.name != dep.uniqueID {
+                                                Text(matched.name)
+                                                    .font(.caption)
+                                                    .fontWeight(.medium)
+                                                    .lineLimit(1)
+                                                Text(dep.uniqueID)
+                                                    .font(.caption2)
+                                                    .foregroundStyle(.secondary)
+                                                    .lineLimit(1)
+                                            } else {
+                                                Text(dep.uniqueID)
+                                                    .font(.caption)
+                                                    .lineLimit(1)
+                                            }
+                                        }
+
                                         Spacer()
+
                                         if let minVer = dep.minimumVersion {
                                             Text("≥ \(minVer)")
                                                 .font(.caption2)
                                                 .foregroundStyle(.secondary)
                                         }
+
+                                        if !dep.isRequired {
+                                            Text("Optional")
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                                .padding(.horizontal, 4)
+                                                .padding(.vertical, 1)
+                                                .background(RoundedRectangle(cornerRadius: 3).fill(.quaternary))
+                                        } else if !isDepInstalled {
+                                            Text("Missing")
+                                                .font(.caption2.bold())
+                                                .foregroundStyle(Color.red)
+                                                .padding(.horizontal, 4)
+                                                .padding(.vertical, 1)
+                                                .background(RoundedRectangle(cornerRadius: 3).fill(Color.red.opacity(0.15)))
+                                        } else {
+                                            Text("Installed")
+                                                .font(.caption2)
+                                                .foregroundStyle(Color.green)
+                                                .padding(.horizontal, 4)
+                                                .padding(.vertical, 1)
+                                                .background(RoundedRectangle(cornerRadius: 3).fill(Color.green.opacity(0.15)))
+                                        }
+                                        if matchedMod != nil {
+                                            Image(systemName: "chevron.right")
+                                                .font(.system(size: 8, weight: .bold))
+                                                .foregroundStyle(.tertiary)
+                                        }
                                     }
-                                    .padding(.vertical, 2)
+                                    .padding(.vertical, 3)
+                                    .contentShape(Rectangle())
+                                    .onTapGesture {
+                                        if let matched = matchedMod {
+                                            state.selectAndRevealMod(id: matched.id)
+                                        }
+                                    }
+                                    .help(matchedMod != nil ? "Installed: \(matchedMod!.name). Click to expand, select, and scroll to this mod." : (isDepInstalled ? "Installed" : "Required dependency is missing!"))
                                 }
                             }
                             .padding(10)
@@ -160,5 +230,18 @@ public struct InspectorView: View {
                 .textSelection(.enabled)
             Spacer()
         }
+    }
+
+    private func isInstalled(dependencyId: String) -> Bool {
+        if dependencyId.caseInsensitiveCompare("Pathoschild.SMAPI") == .orderedSame || 
+           dependencyId.caseInsensitiveCompare("SMAPI") == .orderedSame {
+            return state.settings.gameDetails?.smapiVersion != nil || 
+                   PathingService.shared.resolveSmapiExecutable(gameDirectory: state.gameDirectory) != nil
+        }
+        return state.mods.contains { $0.id.caseInsensitiveCompare(dependencyId) == .orderedSame }
+    }
+
+    private func installedMod(for dependencyId: String) -> Mod? {
+        state.mods.first { $0.id.caseInsensitiveCompare(dependencyId) == .orderedSame }
     }
 }

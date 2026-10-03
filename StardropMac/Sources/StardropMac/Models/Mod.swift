@@ -6,7 +6,7 @@ public struct Mod: Identifiable, Hashable {
     public let directoryURL: URL
     public var isEnabled: Bool
     public var suggestedVersion: String?
-    public var groupName: String?
+    public var updateURL: URL?
 
     public var name: String { manifest.name }
     public var author: String { manifest.author }
@@ -36,6 +36,9 @@ public struct Mod: Identifiable, Hashable {
     }
 
     public var nexusURL: URL? {
+        if let update = updateURL {
+            return update
+        }
         if let id = nexusModId {
             return URL(string: "https://www.nexusmods.com/stardewvalley/mods/\(id)")
         }
@@ -51,13 +54,11 @@ public struct Mod: Identifiable, Hashable {
         manifest: ModManifest,
         directoryURL: URL,
         isEnabled: Bool = true,
-        suggestedVersion: String? = nil,
-        groupName: String? = nil
+        suggestedVersion: String? = nil
     ) {
         self.manifest = manifest
         self.directoryURL = directoryURL
         self.isEnabled = isEnabled
         self.suggestedVersion = suggestedVersion
-        self.groupName = groupName
     }
 }

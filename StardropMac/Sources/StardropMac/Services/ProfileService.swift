@@ -37,7 +37,11 @@ public final class ProfileService {
             profiles.append(def)
         }
 
-        return profiles.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        return profiles.sorted { a, b in
+            if a.name.caseInsensitiveCompare("Default") == .orderedSame { return true }
+            if b.name.caseInsensitiveCompare("Default") == .orderedSame { return false }
+            return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+        }
     }
 
     public func defaultProfile() -> Profile {
@@ -71,5 +75,14 @@ public final class ProfileService {
         )
         saveProfile(copy)
         return copy
+    }
+
+    public func renameProfile(_ profile: Profile, newName: String) -> Profile {
+        guard !profile.isProtected else { return profile }
+        deleteProfile(profile)
+        var renamed = profile
+        renamed.name = newName
+        saveProfile(renamed)
+        return renamed
     }
 }

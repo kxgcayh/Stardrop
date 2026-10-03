@@ -3,7 +3,11 @@ import Foundation
 public final class ModScannerService {
     public static let shared = ModScannerService()
 
-    private let jsonDecoder = JSONDecoder()
+    private let jsonDecoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.allowsJSON5 = true
+        return decoder
+    }()
 
     public func scanMods(in modsFolder: URL, enabledIds: Set<String>? = nil) -> [Mod] {
         var results: [Mod] = []
@@ -13,13 +17,14 @@ public final class ModScannerService {
             return []
         }
 
-        scanDirectory(modsFolder, rootModsURL: modsFolder, currentGroup: nil, results: &results)
+        scanDirectory(modsFolder, results: &results)
 
         // Apply enabled state if provided
         if let enabledIds = enabledIds {
+            let lowercasedEnabled = Set(enabledIds.map { $0.lowercased() })
             for i in 0..<results.count {
-                let id = results[i].manifest.uniqueID
-                results[i].isEnabled = enabledIds.contains { $0.caseInsensitiveCompare(id) == .orderedSame }
+                let id = results[i].manifest.uniqueID.lowercased()
+                results[i].isEnabled = lowercasedEnabled.contains(id)
             }
         }
 
@@ -29,8 +34,6 @@ public final class ModScannerService {
 
     private func scanDirectory(
         _ url: URL,
-        rootModsURL: URL,
-        currentGroup: String?,
         results: inout [Mod]
     ) {
         let fileManager = FileManager.default
@@ -38,7 +41,7 @@ public final class ModScannerService {
 
         // If this folder has a manifest.json, it is a mod!
         if fileManager.fileExists(atPath: manifestURL.path) {
-            if let mod = parseMod(at: url, group: currentGroup) {
+            if let mod = parseMod(at: url) {
                 results.append(mod)
             }
             return // Don't search inside this mod directory for sub-mods
@@ -56,14 +59,12 @@ public final class ModScannerService {
         for item in contents {
             var isDir: ObjCBool = false
             if fileManager.fileExists(atPath: item.path, isDirectory: &isDir), isDir.boolValue {
-                // If we're at the top-level Mods folder and the folder looks like a group (e.g. "[MODS] - Core")
-                let group = (url == rootModsURL) ? item.lastPathComponent : currentGroup
-                scanDirectory(item, rootModsURL: rootModsURL, currentGroup: group, results: &results)
+                scanDirectory(item, results: &results)
             }
         }
     }
 
-    public func parseMod(at folderURL: URL, group: String?) -> Mod? {
+    public func parseMod(at folderURL: URL) -> Mod? {
         let manifestURL = folderURL.appendingPathComponent("manifest.json")
         guard let data = try? Data(contentsOf: manifestURL) else {
             return nil
@@ -74,8 +75,7 @@ public final class ModScannerService {
             return Mod(
                 manifest: manifest,
                 directoryURL: folderURL,
-                isEnabled: true,
-                groupName: group
+                isEnabled: true
             )
         } catch {
             print("Failed to decode manifest at \(manifestURL.path): \(error)")

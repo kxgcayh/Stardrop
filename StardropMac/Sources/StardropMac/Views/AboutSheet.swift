@@ -61,7 +61,7 @@ public struct AboutSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     // Description
-                    Text("Stardrop for macOS is a fast, native mod manager engineered with Swift and SwiftUI specifically for modern macOS. It provides zero-latency profile management, mod group discovery, in-app configuration, live SMAPI launching, and official Nexus Mods API integration.")
+                    Text("Stardrop for macOS is a fast, native mod manager engineered with Swift and SwiftUI specifically for modern macOS. It provides zero-latency profile management, in-app configuration, live SMAPI launching, and official Nexus Mods API integration.")
                         .font(.callout)
                         .foregroundStyle(.primary.opacity(0.9))
                         .fixedSize(horizontal: false, vertical: true)

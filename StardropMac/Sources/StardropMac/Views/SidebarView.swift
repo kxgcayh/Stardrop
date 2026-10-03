@@ -75,18 +75,26 @@ public struct SidebarView: View {
 
             Section {
                 ForEach(state.profiles) { profile in
+                    let isActive = state.activeProfile.id == profile.id
                     HStack {
                         Label {
                             Text(profile.name)
-                                .fontWeight(state.activeProfile.id == profile.id ? .semibold : .regular)
+                                .fontWeight(isActive ? .semibold : .regular)
                         } icon: {
-                            Image(systemName: state.activeProfile.id == profile.id ? "person.crop.circle.fill" : "person.crop.circle")
-                                .foregroundStyle(state.activeProfile.id == profile.id ? .blue : .secondary)
+                            Image(systemName: isActive ? "person.crop.circle.fill" : "person.crop.circle")
+                                .foregroundStyle(isActive ? .blue : .secondary)
                         }
 
                         Spacer()
 
-                        if state.activeProfile.id == profile.id {
+                        Text("\(profile.enabledModIds.count)")
+                            .font(.caption2)
+                            .foregroundStyle(isActive ? .blue : .secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(isActive ? Color.blue.opacity(0.15) : Color.secondary.opacity(0.12)))
+
+                        if isActive {
                             Image(systemName: "checkmark")
                                 .font(.caption.bold())
                                 .foregroundStyle(.blue)
@@ -143,6 +151,16 @@ public struct SidebarView: View {
                 } label: {
                     Label("SMAPI Error Logs", systemImage: "exclamationmark.triangle")
                 }
+                .buttonStyle(.plain)
+
+                Button {
+                    Task {
+                        await state.checkForModUpdates()
+                    }
+                } label: {
+                    Label(state.isCheckingUpdates ? "Checking Updates..." : "Check for Mod Updates", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .disabled(state.isCheckingUpdates)
                 .buttonStyle(.plain)
 
                 Button {

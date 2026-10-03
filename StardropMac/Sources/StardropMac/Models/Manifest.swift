@@ -12,11 +12,27 @@ public struct ManifestDependency: Codable, Identifiable, Hashable {
         case isRequired = "IsRequired"
     }
 
+    public init(uniqueID: String, minimumVersion: String? = nil, isRequired: Bool = true) {
+        self.uniqueID = uniqueID
+        self.minimumVersion = minimumVersion
+        self.isRequired = isRequired
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.uniqueID = try container.decode(String.self, forKey: .uniqueID)
         self.minimumVersion = try container.decodeIfPresent(String.self, forKey: .minimumVersion)
         self.isRequired = try container.decodeIfPresent(Bool.self, forKey: .isRequired) ?? true
+    }
+}
+
+public struct ManifestContentPackFor: Codable, Hashable {
+    public let uniqueID: String
+    public let minimumVersion: String?
+
+    enum CodingKeys: String, CodingKey {
+        case uniqueID = "UniqueID"
+        case minimumVersion = "MinimumVersion"
     }
 }
 
@@ -29,6 +45,20 @@ public struct ModManifest: Codable, Hashable {
     public let entryDll: String?
     public let updateKeys: [String]
     public let dependencies: [ManifestDependency]
+    public let contentPackFor: ManifestContentPackFor?
+
+    public var allDependencies: [ManifestDependency] {
+        var list: [ManifestDependency] = []
+        if let cp = contentPackFor {
+            list.append(ManifestDependency(uniqueID: cp.uniqueID, minimumVersion: cp.minimumVersion, isRequired: true))
+        }
+        for dep in dependencies {
+            if !list.contains(where: { $0.uniqueID.caseInsensitiveCompare(dep.uniqueID) == .orderedSame }) {
+                list.append(dep)
+            }
+        }
+        return list
+    }
 
     enum CodingKeys: String, CodingKey {
         case name = "Name"
@@ -39,6 +69,7 @@ public struct ModManifest: Codable, Hashable {
         case entryDll = "EntryDll"
         case updateKeys = "UpdateKeys"
         case dependencies = "Dependencies"
+        case contentPackFor = "ContentPackFor"
     }
 
     public init(from decoder: Decoder) throws {
@@ -60,5 +91,6 @@ public struct ModManifest: Codable, Hashable {
         }
 
         self.dependencies = try container.decodeIfPresent([ManifestDependency].self, forKey: .dependencies) ?? []
+        self.contentPackFor = try container.decodeIfPresent(ManifestContentPackFor.self, forKey: .contentPackFor)
     }
 }

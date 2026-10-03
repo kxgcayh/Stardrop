@@ -61,12 +61,40 @@ public struct MainView: View {
             }
 
             ToolbarItemGroup(placement: .primaryAction) {
+                // Bulk Mod Actions Menu
+                Menu {
+                    Button("Enable All Mods") {
+                        state.enableAllMods()
+                    }
+                    Button("Disable All Mods") {
+                        state.disableAllMods()
+                    }
+                } label: {
+                    Image(systemName: "checklist")
+                }
+                .help("Bulk Mod Actions (Enable / Disable All Mods)")
+
                 Button {
                     state.refreshMods()
                 } label: {
                     Image(systemName: "arrow.clockwise")
                 }
                 .help("Refresh Mod List")
+
+                Button {
+                    Task {
+                        await state.checkForModUpdates()
+                    }
+                } label: {
+                    if state.isCheckingUpdates {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                    }
+                }
+                .disabled(state.isCheckingUpdates)
+                .help(state.isCheckingUpdates ? "Checking for mod updates..." : "Check for Mod Updates (⌘U)")
 
                 Button {
                     state.isNexusPresented = true
@@ -135,6 +163,25 @@ public struct MainView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .openAbout)) { _ in
             state.isAboutPresented = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .checkForUpdates)) { _ in
+            Task {
+                await state.checkForModUpdates()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .refreshMods)) { _ in
+            state.refreshMods()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .enableAllMods)) { _ in
+            state.enableAllMods()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .disableAllMods)) { _ in
+            state.disableAllMods()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleSelectedMod)) { _ in
+            if let mod = state.selectedMod {
+                state.toggleMod(mod)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .launchSmapi)) { _ in
             state.launchGame()

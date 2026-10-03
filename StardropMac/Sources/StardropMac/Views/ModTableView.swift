@@ -5,7 +5,7 @@ public struct ModTableView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            // Top Bar: Column Headers & Expand/Collapse All
+            // Top Bar: Column Headers
             topHeaderBar
 
             Divider()
@@ -13,14 +13,24 @@ public struct ModTableView: View {
             if state.filteredMods.isEmpty {
                 emptyStateView
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 8) {
-                        ForEach(state.groupedMods) { group in
-                            groupSection(group: group)
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(spacing: 2) {
+                            ForEach(state.filteredMods) { mod in
+                                modRow(mod: mod)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                    }
+                    .onChange(of: state.scrollTargetModId) { _, targetId in
+                        guard let id = targetId else { return }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            withAnimation(.easeInOut(duration: 0.3)) {
+                                proxy.scrollTo(id, anchor: .center)
+                            }
                         }
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
                 }
             }
         }
@@ -31,133 +41,32 @@ public struct ModTableView: View {
 
     private var topHeaderBar: some View {
         HStack(spacing: 0) {
-            // Expand/Collapse All Quick Button
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    if state.areAllGroupsExpanded {
-                        state.collapseAllGroups()
-                    } else {
-                        state.expandAllGroups()
-                    }
-                }
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: state.areAllGroupsExpanded ? "chevron.down" : "chevron.right")
-                        .font(.caption2.bold())
-                    Text(state.areAllGroupsExpanded ? "Collapse All" : "Expand All")
-                        .font(.caption)
-                }
-                .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.plain)
-            .padding(.leading, 16)
+            // State column header
+            Image(systemName: "checkmark.circle")
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .frame(width: 40, alignment: .center)
+
+            Text("Mod Name")
+                .frame(minWidth: 180, alignment: .leading)
+                .padding(.leading, 8)
 
             Spacer()
 
-            // Column Alignment Labels
-            HStack(spacing: 0) {
-                Text("Enabled")
-                    .frame(width: 60, alignment: .center)
+            Text("Version")
+                .frame(width: 110, alignment: .leading)
 
-                Text("Mod Name")
-                    .frame(minWidth: 180, alignment: .leading)
-                    .padding(.leading, 8)
+            Text("Status")
+                .frame(width: 75, alignment: .center)
 
-                Spacer()
-
-                Text("Version")
-                    .frame(width: 110, alignment: .leading)
-
-                Text("Status")
-                    .frame(width: 75, alignment: .center)
-
-                Text("Actions")
-                    .frame(width: 70, alignment: .center)
-            }
-            .font(.caption.bold())
-            .foregroundStyle(.secondary)
-            .padding(.trailing, 16)
+            Text("Actions")
+                .frame(width: 70, alignment: .center)
         }
+        .font(.caption.bold())
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 24)
         .frame(height: 32)
         .background(Color(NSColor.controlBackgroundColor))
-    }
-
-    // MARK: - Group Section
-
-    private func groupSection(group: ModGroup) -> some View {
-        let isExpanded = state.expandedGroups.contains(group.name)
-
-        return VStack(spacing: 0) {
-            // Group Header Bar
-            HStack(spacing: 8) {
-                // Chevron & Title Click Area
-                Button {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        state.toggleGroupExpansion(group.name)
-                    }
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 14)
-
-                        Image(systemName: group.name == "Standalone Mods" ? "shippingbox" : "folder.fill")
-                            .foregroundStyle(group.name == "Standalone Mods" ? Color.secondary : Color.blue)
-                            .font(.system(size: 13))
-
-                        Text(group.name)
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(.primary)
-
-                        // Count badge
-                        Text("\(group.enabledCount)/\(group.totalCount) enabled")
-                            .font(.caption2.bold())
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(
-                                Capsule()
-                                    .fill(group.enabledCount > 0 ? Color.green.opacity(0.15) : Color.secondary.opacity(0.15))
-                            )
-                            .foregroundStyle(group.enabledCount > 0 ? Color.green : Color.secondary)
-                    }
-                }
-                .buttonStyle(.plain)
-
-                Spacer()
-
-                // Batch Enable / Disable Button for this entire group
-                Button {
-                    state.toggleAllModsInGroup(group)
-                } label: {
-                    Text(group.allEnabled ? "Disable All" : "Enable All")
-                        .font(.caption2)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(Capsule().fill(.quaternary))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help(group.allEnabled ? "Disable all mods in \(group.name)" : "Enable all mods in \(group.name)")
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(NSColor.controlBackgroundColor).opacity(0.8))
-            )
-
-            // Expanded Mods List
-            if isExpanded {
-                VStack(spacing: 1) {
-                    ForEach(group.mods) { mod in
-                        modRow(mod: mod)
-                    }
-                }
-                .padding(.top, 4)
-            }
-        }
-        .padding(.vertical, 2)
     }
 
     // MARK: - Mod Row
@@ -166,18 +75,15 @@ public struct ModTableView: View {
         let isSelected = state.selectedModId == mod.id
 
         return HStack(spacing: 0) {
-            // Column 1: Centered Checkbox
+            // Column 1: Status Icon
             HStack {
                 Spacer(minLength: 0)
-                Toggle("", isOn: Binding(
-                    get: { mod.isEnabled },
-                    set: { _ in state.toggleMod(mod) }
-                ))
-                .toggleStyle(.checkbox)
-                .labelsHidden()
+                Image(systemName: mod.isEnabled ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 14))
+                    .foregroundStyle(mod.isEnabled ? Color.green : Color.secondary.opacity(0.45))
                 Spacer(minLength: 0)
             }
-            .frame(width: 60)
+            .frame(width: 40)
 
             // Column 2: Name & Author
             VStack(alignment: .leading, spacing: 2) {
@@ -265,9 +171,17 @@ public struct ModTableView: View {
         .onTapGesture {
             state.selectedModId = mod.id
         }
+        .id(mod.id)
         .contextMenu {
             Button(mod.isEnabled ? "Disable Mod" : "Enable Mod") {
                 state.toggleMod(mod)
+            }
+            Divider()
+            Button("Enable All Mods") {
+                state.enableAllMods()
+            }
+            Button("Disable All Mods") {
+                state.disableAllMods()
             }
             Divider()
             if mod.hasConfig {
