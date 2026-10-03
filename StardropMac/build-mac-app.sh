@@ -49,6 +49,17 @@ cat <<EOF > "$CONTENTS_DIR/Info.plist"
     <string>1</string>
     <key>CFBundleIconFile</key>
     <string>Stardrop</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>NXM</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>nxm</string>
+            </array>
+        </dict>
+    </array>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>

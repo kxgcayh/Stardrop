@@ -92,6 +92,21 @@ The optimized release application bundle will be created at:
 StardropMac/build/Stardrop.app
 ```
 
+### Package Distribution `.dmg` Disk Image
+Create a styled, compressed `.dmg` installer with drag-and-drop installation to `/Applications`:
+```bash
+./build-dmg.sh
+```
+Options:
+- `./build-dmg.sh --skip-build`: Package existing `Stardrop.app` without recompiling.
+- `./build-dmg.sh --open`: Mount and reveal the resulting DMG in Finder.
+- `./build-dmg.sh -v 1.10.4`: Specify custom version tag.
+
+Artifacts produced in `build/`:
+- `Stardrop-<version>-macOS.dmg` (compressed release installer)
+- `Stardrop.dmg` (convenience alias)
+- `Stardrop-<version>-macOS.dmg.sha256` (checksum file)
+
 ### Launching the Application
 ```bash
 # Open standalone bundle
@@ -109,6 +124,7 @@ swift run
 StardropMac/
 ├── Package.swift                    # Swift Package Manager manifest
 ├── build-mac-app.sh                 # Release compilation & bundle script
+├── build-dmg.sh                     # Styled DMG disk image packaging script
 ├── Sources/
 │   └── StardropMac/
 │       ├── StardropMacApp.swift     # App entrypoint & macOS menu bar
