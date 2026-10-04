@@ -1,5 +1,5 @@
 # Stardrop
- 
+
 Stardrop is an open-source, cross-platform mod manager for the game [Stardew Valley](https://www.stardewvalley.net/). It is built using the Avalonia UI framework.
 
 Stardrop utilizes [SMAPI (Stardew Modding API)](https://smapi.io/) to simplify the management and update checking for all applicable Stardew Valley mods.
@@ -47,3 +47,5 @@ Stardrop has been generously translated into several languages by the following 
 ![](https://imgur.com/WdjwfnG.gif)
 
 ![](https://imgur.com/kalsOjS.gif)
+
+![](https://imgur.com/a/8jmEPV1)
