@@ -2,14 +2,17 @@ import SwiftUI
 
 @main
 struct StardropMacApp: App {
+    @StateObject private var state = AppState()
+
     var body: some Scene {
-        WindowGroup {
-            MainView()
+        Window("Stardrop", id: "main") {
+            MainView(state: state)
                 .frame(minWidth: 850, minHeight: 500)
         }
         .windowStyle(.titleBar)
         .windowToolbarStyle(.unified)
         .defaultSize(width: 1080, height: 700)
+        .handlesExternalEvents(matching: ["*"])
         .commands {
             SidebarCommands()
 

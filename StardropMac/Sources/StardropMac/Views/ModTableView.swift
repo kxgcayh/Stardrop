@@ -282,7 +282,8 @@ public struct ModTableView: View {
                     .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
-            .frame(width: 24)
+            .menuIndicator(.hidden)
+            .frame(width: 24, height: 24)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)

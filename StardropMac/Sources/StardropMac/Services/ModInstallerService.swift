@@ -91,8 +91,22 @@ public final class ModInstallerService {
 
                 cleanExtractedFiles(in: tempDir)
 
+                // Check if this archive contains a SMAPI installer script
+                let macInstaller = findFile(named: "install on macOS.command", in: tempDir)
+                if let installerScript = macInstaller {
+                    let installerDir = installerScript.deletingLastPathComponent()
+                    let downloadsDir = PathingService.shared.collectionDownloadsURL.appendingPathComponent("SMAPI_Installer")
+                    try? fileManager.removeItem(at: downloadsDir)
+                    try? fileManager.createDirectory(at: downloadsDir.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try? fileManager.copyItem(at: installerDir, to: downloadsDir)
+                    warnings.append("SMAPI installer extracted to Collection Downloads/SMAPI_Installer. Run 'install on macOS.command' to complete setup.")
+                }
+
                 let detectedMods = scanner.scanMods(in: tempDir)
                 if detectedMods.isEmpty {
+                    if macInstaller != nil {
+                        continue
+                    }
                     warnings.append("'\(url.lastPathComponent)' does not contain a valid SMAPI mod manifest (manifest.json).")
                     continue
                 }
@@ -252,6 +266,22 @@ public final class ModInstallerService {
         for c in candidates {
             if FileManager.default.isExecutableFile(atPath: c) {
                 return URL(fileURLWithPath: c)
+            }
+        }
+        return nil
+    }
+
+    private func findFile(named name: String, in root: URL) -> URL? {
+        let fileManager = FileManager.default
+        let direct = root.appendingPathComponent(name)
+        if fileManager.fileExists(atPath: direct.path) {
+            return direct
+        }
+        if let enumerator = fileManager.enumerator(at: root, includingPropertiesForKeys: nil) {
+            for case let fileURL as URL in enumerator {
+                if fileURL.lastPathComponent.caseInsensitiveCompare(name) == .orderedSame {
+                    return fileURL
+                }
             }
         }
         return nil

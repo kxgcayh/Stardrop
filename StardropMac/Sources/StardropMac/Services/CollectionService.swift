@@ -124,27 +124,9 @@ public final class CollectionService {
             let stepProgress = 1.0 / totalCount
 
             // 1. Check if mod is already installed
-            let isAlreadyInstalled = existingMods.contains(where: { existing in
-                if let modId = colMod.source.modId, let existingNexusId = existing.nexusModId {
-                    if existingNexusId == modId {
-                        return true
-                    }
-                }
-                return existing.name.caseInsensitiveCompare(colMod.name) == .orderedSame ||
-                       existing.id.caseInsensitiveCompare(colMod.name) == .orderedSame
-            })
-
-            if isAlreadyInstalled {
+            if let matched = colMod.findMatchingMod(in: existingMods) {
                 alreadyInstalledCount += 1
-                if let matched = existingMods.first(where: {
-                    if let modId = colMod.source.modId, let existingNexusId = $0.nexusModId {
-                        if existingNexusId == modId { return true }
-                    }
-                    return $0.name.caseInsensitiveCompare(colMod.name) == .orderedSame ||
-                           $0.id.caseInsensitiveCompare(colMod.name) == .orderedSame
-                }) {
-                    newlyInstalledUniqueIds.append(matched.id)
-                }
+                newlyInstalledUniqueIds.append(matched.id)
                 onProgress("Already installed: \(colMod.name)", baseProgress + stepProgress)
                 continue
             }

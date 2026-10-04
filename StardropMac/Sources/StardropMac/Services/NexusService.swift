@@ -344,6 +344,18 @@ public final class NexusService {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
+
+        // If the server returns HTTP 401 when an apiKey was provided, the key may be invalid or expired.
+        // Retry anonymously as collectionRevision is a public GraphQL endpoint.
+        if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 401, apiKey != nil {
+            return try await getCollectionRevision(
+                slug: slug,
+                revision: revision,
+                domainName: domainName,
+                apiKey: nil
+            )
+        }
+
         guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
             let code = (response as? HTTPURLResponse)?.statusCode ?? 500
             throw NSError(domain: "NexusService", code: code, userInfo: [NSLocalizedDescriptionKey: "GraphQL request failed with HTTP \(code)"])
@@ -367,8 +379,18 @@ public final class NexusService {
     }
 
     public func getCollectionDownloadURLs(from downloadLink: String, apiKey: String? = nil) async throws -> [NexusDownloadURL] {
-        guard let url = URL(string: downloadLink) else {
-            throw NSError(domain: "NexusService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid download link URL."])
+        var fullURLString = downloadLink.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !fullURLString.lowercased().hasPrefix("http://") && !fullURLString.lowercased().hasPrefix("https://") {
+            let base = "https://api.nexusmods.com"
+            if fullURLString.hasPrefix("/") {
+                fullURLString = base + fullURLString
+            } else {
+                fullURLString = base + "/" + fullURLString
+            }
+        }
+
+        guard let url = URL(string: fullURLString) else {
+            throw NSError(domain: "NexusService", code: 400, userInfo: [NSLocalizedDescriptionKey: "Invalid download link URL: \(downloadLink)"])
         }
 
         var request = URLRequest(url: url)
@@ -384,9 +406,35 @@ public final class NexusService {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
             let code = (response as? HTTPURLResponse)?.statusCode ?? 500
-            throw NSError(domain: "NexusService", code: code, userInfo: [NSLocalizedDescriptionKey: "Failed to resolve collection download link (HTTP \(code))."])
+            let errorText = String(data: data, encoding: .utf8) ?? ""
+            if code == 401 {
+                throw NSError(domain: "NexusService", code: 401, userInfo: [NSLocalizedDescriptionKey: "Nexus Mods authorization failed (HTTP 401). Please connect your Nexus account in Settings."])
+            }
+            throw NSError(domain: "NexusService", code: code, userInfo: [NSLocalizedDescriptionKey: "Failed to resolve collection download link (HTTP \(code)): \(errorText)"])
         }
 
-        return try JSONDecoder().decode([NexusDownloadURL].self, from: data)
+        struct CollectionDownloadLinksContainer: Codable {
+            let downloadLinks: [NexusDownloadURL]?
+
+            enum CodingKeys: String, CodingKey {
+                case downloadLinks = "download_links"
+            }
+        }
+
+        if let container = try? JSONDecoder().decode(CollectionDownloadLinksContainer.self, from: data),
+           let links = container.downloadLinks, !links.isEmpty {
+            return links
+        }
+
+        if let directList = try? JSONDecoder().decode([NexusDownloadURL].self, from: data) {
+            return directList
+        }
+
+        let bodyText = String(data: data, encoding: .utf8) ?? ""
+        throw NSError(
+            domain: "NexusService",
+            code: 500,
+            userInfo: [NSLocalizedDescriptionKey: "Unable to parse collection download links from Nexus response: \(bodyText)"]
+        )
     }
 }

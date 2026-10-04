@@ -130,9 +130,15 @@ public struct FreeUserQueueSheet: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(item.mod.name)
                             .font(.headline)
-                        Text("Version \(item.mod.version) - \(item.mod.optional ? "Optional" : "Required")")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        if item.mod.isSMAPI {
+                            Text("Core Mod Update - Collection requires SMAPI v\(item.mod.version)")
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                        } else {
+                            Text("Version \(item.mod.version) - \(item.mod.optional ? "Optional" : "Required")")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                     }
 
                     Spacer()

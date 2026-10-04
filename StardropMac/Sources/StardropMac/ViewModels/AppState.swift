@@ -10,6 +10,7 @@ public enum SidebarCategory: Hashable {
     case updatableOnly
 }
 
+@MainActor
 public final class AppState: ObservableObject {
     @Published public var mods: [Mod] = []
     @Published public var profiles: [Profile] = []
@@ -922,8 +923,10 @@ public final class AppState: ObservableObject {
         }
 
         await MainActor.run {
-            if let idx = self.mods.firstIndex(where: { $0.id == mod.id }) {
-                self.mods[idx].isEndorsing = true
+            for i in 0..<self.mods.count {
+                if self.mods[i].nexusModId == modId {
+                    self.mods[i].isEndorsing = true
+                }
             }
         }
 
@@ -933,18 +936,24 @@ public final class AppState: ObservableObject {
             let response = try await NexusService.shared.setModEndorsement(modId: modId, endorse: targetState, apiKey: apiKey)
 
             await MainActor.run {
-                if let idx = self.mods.firstIndex(where: { $0.id == mod.id }) {
-                    self.mods[idx].isEndorsing = false
+                for i in 0..<self.mods.count {
+                    if self.mods[i].nexusModId == modId {
+                        self.mods[i].isEndorsing = false
+                    }
                 }
 
                 switch response {
                 case .endorsed:
-                    if let idx = self.mods.firstIndex(where: { $0.id == mod.id }) {
-                        self.mods[idx].isEndorsed = true
+                    for i in 0..<self.mods.count {
+                        if self.mods[i].nexusModId == modId {
+                            self.mods[i].isEndorsed = true
+                        }
                     }
                 case .abstained:
-                    if let idx = self.mods.firstIndex(where: { $0.id == mod.id }) {
-                        self.mods[idx].isEndorsed = false
+                    for i in 0..<self.mods.count {
+                        if self.mods[i].nexusModId == modId {
+                            self.mods[i].isEndorsed = false
+                        }
                     }
                 case .isOwnMod:
                     self.endorsementAlertMessage = "Unable to set the endorsement state:\n\nYou are the owner of this mod."
@@ -959,8 +968,10 @@ public final class AppState: ObservableObject {
             }
         } catch {
             await MainActor.run {
-                if let idx = self.mods.firstIndex(where: { $0.id == mod.id }) {
-                    self.mods[idx].isEndorsing = false
+                for i in 0..<self.mods.count {
+                    if self.mods[i].nexusModId == modId {
+                        self.mods[i].isEndorsing = false
+                    }
                 }
                 self.endorsementAlertMessage = "Unable to set the endorsement state:\n\n\(error.localizedDescription)"
             }
@@ -1084,11 +1095,14 @@ public final class AppState: ObservableObject {
         separatorName: String,
         collectionName: String
     ) {
+        let smapiVersion = self.settings.gameDetails?.smapiVersion
         let manager = CollectionQueueManager(
             mods: mods,
             targetProfileName: targetProfileName,
             separatorName: separatorName,
-            collectionName: collectionName
+            collectionName: collectionName,
+            existingMods: self.mods,
+            currentSMAPIVersion: smapiVersion
         )
         self.activeQueueManager = manager
         self.isFreeUserQueuePresented = true
@@ -1100,22 +1114,25 @@ public final class AppState: ObservableObject {
         refreshMods()
 
         let installedItems = manager.items.filter { $0.status == .installed }
-        guard !installedItems.isEmpty else { return }
+        guard !installedItems.isEmpty else {
+            self.activeQueueManager = nil
+            self.isFreeUserQueuePresented = false
+            return
+        }
 
         var installedUniqueIds: [String] = []
+        let smapiVersion = self.settings.gameDetails?.smapiVersion
         for item in installedItems {
-            if let matched = self.mods.first(where: { m in
-                if let modId = item.mod.source.modId, let existingNexusId = m.nexusModId {
-                    if existingNexusId == modId { return true }
-                }
-                return m.name.caseInsensitiveCompare(item.mod.name) == .orderedSame ||
-                       m.id.caseInsensitiveCompare(item.mod.name) == .orderedSame
-            }) {
+            if let matched = item.mod.findMatchingMod(in: self.mods, currentSMAPIVersion: smapiVersion) {
                 installedUniqueIds.append(matched.id)
             }
         }
 
-        guard !installedUniqueIds.isEmpty else { return }
+        guard !installedUniqueIds.isEmpty else {
+            self.activeQueueManager = nil
+            self.isFreeUserQueuePresented = false
+            return
+        }
 
         // Ensure profile exists or update it
         self.profiles = profileService.loadProfiles()
@@ -1152,6 +1169,9 @@ public final class AppState: ObservableObject {
         }
         separatorService.saveSeparators(existingSeparators, for: manager.targetProfileName)
 
+        self.activeQueueManager = nil
+        self.isFreeUserQueuePresented = false
+
         selectProfile(named: manager.targetProfileName)
         refreshMods()
     }
@@ -1160,11 +1180,13 @@ public final class AppState: ObservableObject {
 
     @MainActor
     public func handleOpenURL(_ url: URL) {
+        NSApp.activate(ignoringOtherApps: true)
         let parsed = NXMUrlParser.parse(url)
         switch parsed {
         case .mod(let gameId, let modId, let fileId, let key, let expires, _):
             Task { @MainActor in
-                await handleIncomingModDownload(
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                await self.handleIncomingModDownload(
                     gameDomain: gameId,
                     modId: modId,
                     fileId: fileId,
@@ -1175,7 +1197,8 @@ public final class AppState: ObservableObject {
 
         case .collection(let gameId, let slug, let revisionNumber):
             Task { @MainActor in
-                await handleIncomingCollection(
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                await self.handleIncomingCollection(
                     gameId: gameId,
                     slug: slug,
                     revisionNumber: revisionNumber
@@ -1187,6 +1210,7 @@ public final class AppState: ObservableObject {
         }
     }
 
+    @MainActor
     private func handleIncomingModDownload(
         gameDomain: String,
         modId: Int,
@@ -1260,6 +1284,7 @@ public final class AppState: ObservableObject {
         }
     }
 
+    @MainActor
     private func handleIncomingCollection(
         gameId: String,
         slug: String,
@@ -1280,10 +1305,17 @@ public final class AppState: ObservableObject {
                 throw NSError(domain: "NXMCollection", code: 404, userInfo: [NSLocalizedDescriptionKey: "No download link available for this collection revision."])
             }
 
+            guard let apiKey = self.nexusApiKey, !apiKey.isEmpty else {
+                self.isInstallingMods = false
+                self.modInstallProgressMessage = nil
+                self.modInstallResultAlert = "Please connect your Nexus Mods account in Settings before downloading collections."
+                return
+            }
+
             self.modInstallProgressMessage = "Resolving collection download..."
             let mirrors = try await NexusService.shared.getCollectionDownloadURLs(
                 from: downloadLink,
-                apiKey: self.nexusApiKey
+                apiKey: apiKey
             )
 
             guard let firstMirror = mirrors.first?.uri, let downloadURL = URL(string: firstMirror) else {

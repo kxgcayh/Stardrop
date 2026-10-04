@@ -65,8 +65,11 @@ public final class CollectionQueueManager: ObservableObject {
     public var onFinished: (() -> Void)?
 
     public var currentItem: CollectionQueueItem? {
+        guard !isFinished else { return nil }
         guard currentIndex >= 0 && currentIndex < items.count else { return nil }
-        return items[currentIndex]
+        let item = items[currentIndex]
+        guard !item.status.isTerminal else { return nil }
+        return item
     }
 
     public var completedCount: Int {
@@ -85,16 +88,25 @@ public final class CollectionQueueManager: ObservableObject {
         mods: [CollectionMod],
         targetProfileName: String,
         separatorName: String,
-        collectionName: String
+        collectionName: String,
+        existingMods: [Mod] = [],
+        currentSMAPIVersion: String? = nil
     ) {
         self.targetProfileName = targetProfileName
         self.separatorName = separatorName
         self.collectionName = collectionName
-        self.items = mods.map { CollectionQueueItem(mod: $0) }
+        self.items = mods.map { mod in
+            if mod.isInstalled(in: existingMods, currentSMAPIVersion: currentSMAPIVersion) {
+                return CollectionQueueItem(mod: mod, status: .installed)
+            } else {
+                return CollectionQueueItem(mod: mod, status: .pending)
+            }
+        }
         advanceToNextPending()
     }
 
     public func startQueue() {
+        guard !isFinished else { return }
         isRunning = true
         if let current = currentItem {
             openInBrowser(item: current)
@@ -102,6 +114,7 @@ public final class CollectionQueueManager: ObservableObject {
     }
 
     public func openInBrowser(item: CollectionQueueItem) {
+        guard !item.status.isTerminal else { return }
         guard let modId = item.mod.source.modId, let fileId = item.mod.source.fileId else {
             item.status = .skipped
             advanceToNextPending()
@@ -121,7 +134,7 @@ public final class CollectionQueueManager: ObservableObject {
     public func skip(item: CollectionQueueItem) {
         item.status = .skipped
         advanceToNextPending()
-        if autoOpenNext, let next = currentItem {
+        if autoOpenNext, isRunning, let next = currentItem {
             openInBrowser(item: next)
         }
     }
@@ -129,9 +142,14 @@ public final class CollectionQueueManager: ObservableObject {
     public func advanceToNextPending() {
         if let nextIdx = items.firstIndex(where: { !$0.status.isTerminal }) {
             currentIndex = nextIdx
-            items[nextIdx].status = .ready
+            if items[nextIdx].status == .pending {
+                items[nextIdx].status = .ready
+            }
+            isFinished = false
         } else {
+            currentIndex = -1
             isFinished = true
+            isRunning = false
             statusMessage = "All items in queue processed."
             onFinished?()
         }
@@ -147,11 +165,17 @@ public final class CollectionQueueManager: ObservableObject {
         modsDirectory: URL,
         existingMods: [Mod]
     ) async -> Bool {
-        // Find matching item in queue
+        // Find matching item in queue: exact modId + fileId, or fallback to modId
         guard let item = items.first(where: {
             $0.mod.source.modId == modId && $0.mod.source.fileId == fileId && !$0.status.isTerminal
+        }) ?? items.first(where: {
+            $0.mod.source.modId == modId && !$0.status.isTerminal
         }) else {
             return false
+        }
+
+        if case .downloading = item.status {
+            return true
         }
 
         NSApp.activate(ignoringOtherApps: true)

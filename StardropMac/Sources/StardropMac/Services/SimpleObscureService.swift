@@ -22,54 +22,65 @@ public final class SimpleObscureService {
     private let pathing = PathingService.shared
 
     public var notionURL: URL {
-        pathing.cacheURL.appendingPathComponent("Notion.json")
+        let inHome = pathing.homeURL.appendingPathComponent("Notion.json")
+        if FileManager.default.fileExists(atPath: inHome.path) {
+            return inHome
+        }
+        return pathing.cacheURL.appendingPathComponent("Notion.json")
     }
 
     /// Attempts to decrypt the stored key using Notion.json (Lock & Vector).
-    /// If Notion.json does not exist or decryption fails, returns rawKey if it appears to be a plaintext key.
+    /// If Notion.json does not exist or decryption fails, returns nil if rawKey is ciphertext,
+    /// or rawKey only if it appears to be an unencrypted plain API key.
     public func getDecryptedKey(rawKey: String?) -> String? {
         guard let rawKey = rawKey?.trimmingCharacters(in: .whitespacesAndNewlines), !rawKey.isEmpty else {
             return nil
         }
 
-        guard let notionData = try? Data(contentsOf: notionURL),
-              let pairedKeys = try? JSONDecoder().decode(PairedKeys.self, from: notionData),
-              let lockB64 = pairedKeys.lock,
-              let vectorB64 = pairedKeys.vector,
-              let keyData = Data(base64Encoded: lockB64),
-              let ivData = Data(base64Encoded: vectorB64),
-              let cipherData = Data(base64Encoded: rawKey) else {
-            return rawKey
-        }
+        if let notionData = try? Data(contentsOf: notionURL),
+           let pairedKeys = try? JSONDecoder().decode(PairedKeys.self, from: notionData),
+           let lockB64 = pairedKeys.lock,
+           let vectorB64 = pairedKeys.vector,
+           let keyData = Data(base64Encoded: lockB64),
+           let ivData = Data(base64Encoded: vectorB64),
+           let cipherData = Data(base64Encoded: rawKey) {
 
-        var outBytes = [UInt8](repeating: 0, count: cipherData.count + kCCBlockSizeAES128)
-        var numBytesDecrypted: size_t = 0
+            var outBytes = [UInt8](repeating: 0, count: cipherData.count + kCCBlockSizeAES128)
+            var numBytesDecrypted: size_t = 0
 
-        let status = cipherData.withUnsafeBytes { cipherRaw in
-            keyData.withUnsafeBytes { keyRaw in
-                ivData.withUnsafeBytes { ivRaw in
-                    CCCrypt(
-                        CCOperation(kCCDecrypt),
-                        CCAlgorithm(kCCAlgorithmAES),
-                        CCOptions(kCCOptionPKCS7Padding),
-                        keyRaw.baseAddress,
-                        keyData.count,
-                        ivRaw.baseAddress,
-                        cipherRaw.baseAddress,
-                        cipherData.count,
-                        &outBytes,
-                        outBytes.count,
-                        &numBytesDecrypted
-                    )
+            let status = cipherData.withUnsafeBytes { cipherRaw in
+                keyData.withUnsafeBytes { keyRaw in
+                    ivData.withUnsafeBytes { ivRaw in
+                        CCCrypt(
+                            CCOperation(kCCDecrypt),
+                            CCAlgorithm(kCCAlgorithmAES),
+                            CCOptions(kCCOptionPKCS7Padding),
+                            keyRaw.baseAddress,
+                            keyData.count,
+                            ivRaw.baseAddress,
+                            cipherRaw.baseAddress,
+                            cipherData.count,
+                            &outBytes,
+                            outBytes.count,
+                            &numBytesDecrypted
+                        )
+                    }
+                }
+            }
+
+            if status == kCCSuccess {
+                let decryptedData = Data(bytes: outBytes, count: numBytesDecrypted)
+                if let plain = String(data: decryptedData, encoding: .utf8), !plain.isEmpty {
+                    return plain
                 }
             }
         }
 
-        if status == kCCSuccess {
-            let decryptedData = Data(bytes: outBytes, count: numBytesDecrypted)
-            if let plain = String(data: decryptedData, encoding: .utf8), !plain.isEmpty {
-                return plain
-            }
+        // If decryption fails or Notion.json does not exist:
+        // Plaintext API keys on Nexus Mods are alphanumeric/hex tokens without base64 padding or slashes.
+        // If rawKey appears to be an encrypted AES base64 payload, do not return it as an API key.
+        if rawKey.contains("=") || rawKey.contains("/") || rawKey.contains("+") || rawKey.count > 64 {
+            return nil
         }
 
         return rawKey
@@ -122,13 +133,17 @@ public final class SimpleObscureService {
         let cipherData = Data(bytes: outBytes, count: numBytesEncrypted)
         let cipherB64 = cipherData.base64EncodedString()
 
-        // Write Notion.json
+        // Write Notion.json to homeURL and cacheURL
         let paired = PairedKeys(lock: keyData.base64EncodedString(), vector: ivData.base64EncodedString())
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         if let encoded = try? encoder.encode(paired) {
+            let homeNotion = pathing.homeURL.appendingPathComponent("Notion.json")
+            let cacheNotion = pathing.cacheURL.appendingPathComponent("Notion.json")
+            try? FileManager.default.createDirectory(at: pathing.homeURL, withIntermediateDirectories: true)
             try? FileManager.default.createDirectory(at: pathing.cacheURL, withIntermediateDirectories: true)
-            try? encoded.write(to: notionURL, options: .atomic)
+            try? encoded.write(to: homeNotion, options: .atomic)
+            try? encoded.write(to: cacheNotion, options: .atomic)
         }
 
         return cipherB64
@@ -140,7 +155,10 @@ public final class SimpleObscureService {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         if let encoded = try? encoder.encode(empty) {
-            try? encoded.write(to: notionURL, options: .atomic)
+            let homeNotion = pathing.homeURL.appendingPathComponent("Notion.json")
+            let cacheNotion = pathing.cacheURL.appendingPathComponent("Notion.json")
+            try? encoded.write(to: homeNotion, options: .atomic)
+            try? encoded.write(to: cacheNotion, options: .atomic)
         }
     }
 }

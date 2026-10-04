@@ -25,6 +25,9 @@ public struct Mod: Identifiable, Hashable {
     }
 
     public var nexusModId: Int? {
+        if isCoreSMAPI || id.caseInsensitiveCompare("smapi") == .orderedSame {
+            return 2400
+        }
         for key in manifest.updateKeys {
             let lower = key.lowercased()
             if lower.hasPrefix("nexus:") {
@@ -38,11 +41,11 @@ public struct Mod: Identifiable, Hashable {
     }
 
     public var nexusURL: URL? {
-        if let update = updateURL {
-            return update
-        }
         if let id = nexusModId {
             return URL(string: "https://www.nexusmods.com/stardewvalley/mods/\(id)")
+        }
+        if let update = updateURL {
+            return update
         }
         return nil
     }

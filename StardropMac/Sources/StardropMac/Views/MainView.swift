@@ -2,10 +2,14 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 public struct MainView: View {
-    @StateObject private var state = AppState()
+    @ObservedObject var state: AppState
     @State private var isInspectorPresented = true
     @State private var showingErrorAlert = false
     @State private var isDropTargeted = false
+
+    public init(state: AppState? = nil) {
+        self.state = state ?? AppState()
+    }
 
     public var body: some View {
         NavigationSplitView {
