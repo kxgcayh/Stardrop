@@ -1,49 +1,56 @@
 # StardropMac
 
-A 100% native macOS mod manager for [Stardew Valley](https://www.stardewvalley.net/) built with Swift 6 and SwiftUI, engineered specifically for Apple Silicon and modern macOS (macOS 14 Sonoma and macOS 15 Sequoia+).
+A native macOS mod manager for [Stardew Valley](https://www.stardewvalley.net/) built in Swift and SwiftUI, compatible with macOS 14 (Sonoma) and macOS 15 (Sequoia).
 
 ---
 
-## Features & Highlights
+## Features
 
-### ⚡️ 100% Native macOS Architecture
-- Built with pure **SwiftUI** and **AppKit** — no Electron, Avalonia, or Skia pixel-drawing emulation.
-- Fluid 120Hz ProMotion animations, native physics, and kinetic overscroll bounce.
-- Translucent sidebar materials (`.sidebar`), native sheets, alerts, and system inspectors.
+### Native Architecture
+- Built with Swift and SwiftUI for macOS.
+- Native binary for Apple Silicon (arm64) and Intel (x86_64).
+- Operates independently without requiring .NET, Mono, or third-party runtime frameworks.
 
-### 📋 Clean & Aligned Mod Table
-- Direct, unified mod list with centered enabled/disabled toggles.
-- Clean layout with author, version tags, update indicators, and direct action shortcuts.
-- Smooth scrolling and instant selection of mods with zero overhead.
+### Mod Separators
+- Visual separator banners inspired by Mod Organizer 2 to group mods into logical categories.
+- Collapsible and expandable sections.
+- Reorder separators and move mods between separators.
+- Bulk enable and disable mods within a specific separator.
+- Auto-generate separators based on mod folder structure (e.g. `[MODS] - Core`).
 
-### 🌐 Official Nexus Mods API Integration
-- Connect your Nexus Mods account directly via your Personal API Key.
-- Live key validation against `https://api.nexusmods.com/v1/users/validate.json`.
-- Automatic detection of **Nexus Premium** membership status.
-- Accessible from the **Sidebar ("Services")**, **Top Toolbar** (globe icon), **App Settings (`⌘,`)**, and macOS Menu Bar (`⇧⌘N`).
-- Secure local storage conforming to Stardrop's `Settings.json` schema.
+### Mod Table & Quick Toggling
+- Unified mod list with status checkboxes and status indicator badges.
+- Clickable checkbox or status badge to toggle individual mods.
+- Spacebar shortcut to toggle the selected mod on or off.
+- Arrow key navigation (Up/Down) through visible mods in display order.
+- Intelligent focus management: search bar and text field typing do not trigger mod toggle shortcuts.
 
-### 🔄 Mod Update Engine (Nexus, GitHub, CurseForge)
-- **Automatic Background Check**: Asynchronously checks for newer versions on startup using the official SMAPI mod update API (`smapi.io/api/v3.0/mods`).
-- **Manual Check**: One-click check via the top toolbar button, macOS menu bar (`⌘U`), or the sidebar Tools section.
-- **Visual Status**: Shows orange `Update [Version]` pills directly in the mod table and badges the **Updates** category in the sidebar.
+### SMAPI Core Component Protection
+- Automatic detection and case-insensitive manifest parsing for bundled SMAPI mods (`ConsoleCommands`, `SaveBackup`, and `ErrorHandler`).
+- Prevents core SMAPI components from being disabled during bulk operations or accidental clicks.
 
-### 👤 Profile Management
-- Maintain distinct profiles for different farms, challenge runs, or multiplayer setups.
-- Real-time switching, profile duplication, and custom profile creation.
-- Seamless SMAPI launching: links only active profile mods into `Selected Mods/` with `SMAPI_MODS_PATH` injection.
+### Mod Updates
+- Checks for updates via the official SMAPI mod update registry (`smapi.io`).
+- Displays available version updates with direct download links.
+- Filter category to view only mods with updates available.
 
-### 🛠️ In-App Mod Config Editor
-- Inspect and modify mod `config.json` files without leaving the app.
-- Preserves formatting and writes changes safely to disk.
+### Nexus Mods Integration
+- Optional personal API key validation with Nexus Mods.
+- Displays account details and membership tier (Free / Premium).
+- Direct links to Nexus mod pages.
 
-### ℹ️ Native About & System Diagnostics
-- Integrated **About Stardrop** sheet displaying:
-  - App identity and native build version
-  - Host architecture (`Apple Silicon arm64` / `Intel x86_64`)
-  - Live environment diagnostics: detected Stardew Valley version, SMAPI version, Game folder, and Mods folder paths
-  - Attribution to Floogen, ConcernedApe, and Pathoschild
-  - Quick links to GitHub repository, documentation, SMAPI.io, Nexus Mods, and Issue tracker.
+### Profile Management
+- Multiple profiles with independent mod selections and separator arrangements.
+- Real-time profile switching, duplication, and creation.
+- Seamless SMAPI launching: stages active mods into `Selected Mods/` via symlinks without duplicating game files.
+
+### In-App Config Editor
+- Edit `config.json` files directly within the application.
+- JSON syntax validation before saving.
+
+### Diagnostic Tools
+- About dialog with environment diagnostics: detected game version, SMAPI version, and file paths.
+- One-click shortcuts to open the mod directory, SMAPI logs, and configuration directories in Finder.
 
 ---
 
@@ -51,68 +58,69 @@ A 100% native macOS mod manager for [Stardew Valley](https://www.stardewvalley.n
 
 | Shortcut | Action |
 | :--- | :--- |
-| `⌘R` | **Launch Game** with SMAPI |
-| `⌘U` | **Check for Mod Updates** |
-| `⌘,` | Open **Settings** |
-| `⇧⌘N` | Open **Nexus Mods Account** sheet |
-| `⌘S` | Toggle Sidebar |
-| `Escape` | Dismiss active sheet / modal |
+| `Space` | Toggle selected mod enabled/disabled |
+| `↑` / `↓` | Navigate through mod list |
+| `⌘R` | Launch Stardew Valley with SMAPI |
+| `⌘U` | Check for mod updates |
+| `⌘,` | Open Preferences / Settings |
+| `⇧⌘N` | Open Nexus Mods Account |
+| `⇧⌘S` | Create new separator |
+| `Escape` | Dismiss active modal or sheet |
 
 ---
 
 ## Data Storage & Compatibility
 
-`StardropMac` is designed to be 100% compatible with existing Stardrop installations. It directly shares and preserves your settings and profiles at:
+StardropMac shares the standard Stardrop data format and stores configuration files at:
 
 ```
 ~/Library/Application Support/Stardrop/
 ├── Data/
-│   ├── Settings.json        # User preferences, folder paths, Nexus details
-│   └── Profiles/            # Profile configurations (*.json)
-│       └── Default.json
+│   ├── Settings.json        # Preferences, configured paths, Nexus credentials
+│   ├── Profiles/            # Profile configurations (*.json)
+│   │   ├── Default.json
+│   │   └── Small.json
+│   └── Separators/          # Separator structures per profile (*.json)
+│       ├── Default.json
+│       └── Small.json
 └── Logs/
     └── Stardrop.log
 ```
 
 ---
 
-## Building & Running
+## Building from Source
 
 ### Prerequisites
-- macOS 14.0+ (Sonoma or Sequoia)
+- macOS 14.0 or newer
 - Xcode Command Line Tools (`xcode-select --install`) or Swift 5.9+ toolchain
 
-### Build Standalone `.app` Bundle
+### Build Application Bundle
 Run the build script from the `StardropMac/` directory:
 ```bash
 ./build-mac-app.sh
 ```
-The optimized release application bundle will be created at:
-```
-StardropMac/build/Stardrop.app
-```
+The output bundle will be located at `StardropMac/build/Stardrop.app`.
 
-### Package Distribution `.dmg` Disk Image
-Create a styled, compressed `.dmg` installer with drag-and-drop installation to `/Applications`:
+### Package Disk Image (DMG)
+To build a compressed, distributable `.dmg` with an `/Applications` drag-and-drop link:
 ```bash
 ./build-dmg.sh
 ```
-Options:
-- `./build-dmg.sh --skip-build`: Package existing `Stardrop.app` without recompiling.
-- `./build-dmg.sh --open`: Mount and reveal the resulting DMG in Finder.
-- `./build-dmg.sh -v 1.10.4`: Specify custom version tag.
 
-Artifacts produced in `build/`:
-- `Stardrop-<version>-macOS.dmg` (compressed release installer)
-- `Stardrop.dmg` (convenience alias)
-- `Stardrop-<version>-macOS.dmg.sha256` (checksum file)
+Available flags:
+- `./build-dmg.sh --skip-build`: Package an existing `Stardrop.app` without recompiling.
+- `./build-dmg.sh --open`: Mount and open the resulting DMG in Finder.
+- `./build-dmg.sh -v <version>`: Specify a release version string.
 
-### Launching the Application
+Outputs generated in `StardropMac/build/`:
+- `Stardrop-<version>-macOS.dmg`
+- `Stardrop.dmg`
+- `Stardrop-<version>-macOS.dmg.sha256`
+
+### Development Mode
+To run directly via Swift Package Manager:
 ```bash
-# Open standalone bundle
-open build/Stardrop.app
-
-# Or run directly in debug/development mode
 swift run
 ```
 
@@ -123,44 +131,51 @@ swift run
 ```
 StardropMac/
 ├── Package.swift                    # Swift Package Manager manifest
-├── build-mac-app.sh                 # Release compilation & bundle script
-├── build-dmg.sh                     # Styled DMG disk image packaging script
+├── build-mac-app.sh                 # Application bundle build script
+├── build-dmg.sh                     # Disk image (DMG) packaging script
 ├── Sources/
 │   └── StardropMac/
-│       ├── StardropMacApp.swift     # App entrypoint & macOS menu bar
-│       ├── Models/                  # Data structures (Mod, Profile, Settings, Manifest)
+│       ├── StardropMacApp.swift     # App entrypoint and menu commands
+│       ├── Models/
+│       │   ├── Manifest.swift       # Mod manifest parsing and dependency models
+│       │   ├── Mod.swift            # Mod representation and metadata
+│       │   ├── ModSeparator.swift   # Separator group model
+│       │   ├── Profile.swift        # Profile configuration model
+│       │   └── Settings.swift       # Application settings model
 │       ├── Services/
-│       │   ├── ModScannerService.swift      # Manifest scanner & parser
-│       │   ├── SMAPILauncherService.swift   # Symlink manager & process launcher
-│       │   ├── NexusService.swift           # Nexus Mods REST API client
-│       │   ├── ModUpdateService.swift       # SMAPI mod update engine
-│       │   ├── PathingService.swift         # Path resolution (Steam, GOG, App Support)
-│       │   ├── ProfileService.swift         # Profile load/save
-│       │   └── SettingsService.swift        # Settings.json persistence
+│       │   ├── ModScannerService.swift      # Directory scanner and manifest reader
+│       │   ├── ModUpdateService.swift       # SMAPI mod update registry client
+│       │   ├── NexusService.swift           # Nexus Mods API client
+│       │   ├── PathingService.swift         # Directory and executable path resolver
+│       │   ├── ProfileService.swift         # Profile disk persistence
+│       │   ├── SeparatorService.swift       # Separator disk persistence
+│       │   ├── SettingsService.swift        # Settings disk persistence
+│       │   └── SMAPILauncherService.swift   # Symlink manager and process launcher
 │       ├── ViewModels/
-│       │   └── AppState.swift               # Observable app state & business logic
+│       │   └── AppState.swift               # Application state and business logic
 │       └── Views/
-│           ├── MainView.swift               # Root NavigationSplitView & Toolbar
-│           ├── SidebarView.swift            # Categories, Profiles, Tools, Services
-│           ├── ModTableView.swift           # Center unified mod table
-│           ├── InspectorView.swift          # Mod inspector & details pane
-│           ├── NexusAccountSheet.swift      # Nexus API connection & status modal
-│           ├── AboutSheet.swift             # Native About & diagnostics dialog
-│           ├── SettingsSheet.swift          # Game paths & preferences sheet
-│           ├── NewProfileSheet.swift        # Profile creator sheet
-│           └── ConfigEditorSheet.swift      # In-app config.json editor
+│           ├── AboutSheet.swift             # About and system diagnostics dialog
+│           ├── ConfigEditorSheet.swift      # In-app config.json editor
+│           ├── InspectorView.swift          # Right sidebar mod inspector
+│           ├── MainView.swift               # Root navigation split view and toolbar
+│           ├── ModTableView.swift           # Main mod table and separator sections
+│           ├── NewProfileSheet.swift        # Profile creation sheet
+│           ├── NexusAccountSheet.swift      # Nexus account connection modal
+│           ├── SeparatorSheets.swift        # Separator creation and rename sheets
+│           ├── SettingsSheet.swift          # Configuration and paths modal
+│           └── SidebarView.swift            # Left sidebar categories and profile list
 └── build/
-    └── Stardrop.app                         # Built macOS Application Bundle
+    ├── Stardrop.app                         # Built application bundle
+    └── Stardrop.dmg                         # Distributable disk image
 ```
 
 ---
 
 ## Credits & Attribution
 
-- **Original Project Creator**: [Floogen](https://github.com/Floogen) — creator and maintainer of Stardrop.
-- **SMAPI**: [Pathoschild](https://github.com/Pathoschild) and the Stardew Valley modding community.
-- **Stardew Valley**: [Eric "ConcernedApe" Barone](https://www.stardewvalley.net/).
-- **Translators**: Stardrop translations generously contributed by community members worldwide.
+- **Original Project**: [Floogen/Stardrop](https://github.com/Floogen/Stardrop)
+- **SMAPI**: [Pathoschild](https://github.com/Pathoschild) and the Stardew Valley modding community
+- **Stardew Valley**: [Eric "ConcernedApe" Barone](https://www.stardewvalley.net/)
 
 ---
 
