@@ -14,9 +14,10 @@ A native macOS mod manager for [Stardew Valley](https://www.stardewvalley.net/) 
 ### Mod Separators
 - Visual separator banners inspired by Mod Organizer 2 to group mods into logical categories.
 - Collapsible and expandable sections.
-- Reorder separators and move mods between separators.
+- Reorder separators and move mods between separators (via menu, or drag & drop).
 - Bulk enable and disable mods within a specific separator.
 - Auto-generate separators based on mod folder structure (e.g. `[MODS] - Core`).
+- **Separator drag & drop**: drag a collapsed separator's header onto another separator to reorder them. Expanded separators can be dropped onto, but cannot be dragged.
 
 ### Mod Table, Multi-Selection & Quick Toggling
 - Unified mod list with status checkboxes and status indicator badges.
@@ -28,6 +29,8 @@ A native macOS mod manager for [Stardew Valley](https://www.stardewvalley.net/) 
 - **Spacebar Toggle**: Press `Space` to toggle single or multiple selected mods. If any selected mod is disabled, pressing `Space` enables all of them; pressing again disables all of them.
 - Arrow key navigation (`↑`/`↓`) through visible mods in display order.
 - Intelligent focus management: search bar and text field typing do not trigger mod toggle shortcuts.
+- **Mod drag & drop**: drag mod rows to reorder them within their list, move them from one separator into another (drop onto a separator header or onto a mod row inside it), or drop them onto the `Unassigned Mods` header to unassign.
+- **Disabled dependency indicator**: mods whose required dependencies are missing or disabled show an orange "?" badge in the status column, with details in the tooltip; the inspector dependency list shows a matching "Disabled" (orange) or green/gray installed state.
 
 ### SMAPI Core Component Protection
 - Automatic detection and case-insensitive manifest parsing for bundled SMAPI mods (`ConsoleCommands`, `SaveBackup`, and `ErrorHandler`).
