@@ -374,7 +374,8 @@ public struct ModTableView: View {
     // MARK: - Mod Row
 
     private func modRow(mod: Mod) -> some View {
-        let isSelected = state.selectedModId == mod.id
+        let isSelected = state.isModSelected(mod.id)
+        let isPrimary = state.selectedModId == mod.id
 
         return HStack(spacing: 0) {
             // Column 1: Status Icon / Checkbox
@@ -387,8 +388,12 @@ public struct ModTableView: View {
                         .help("Core SMAPI Component (Always Active)")
                 } else {
                     Button {
-                        state.selectedModId = mod.id
-                        state.toggleMod(mod)
+                        if state.selectedModIds.contains(mod.id) && state.selectedModIds.count > 1 {
+                            state.toggleSelectedMods()
+                        } else {
+                            state.handleModClick(mod, isShift: false, isCommand: false)
+                            state.toggleMod(mod)
+                        }
                         DispatchQueue.main.async {
                             NSApp.keyWindow?.makeFirstResponder(nil)
                         }
@@ -443,8 +448,12 @@ public struct ModTableView: View {
                         .help("Core SMAPI Component (Always Active)")
                 } else {
                     Button {
-                        state.selectedModId = mod.id
-                        state.toggleMod(mod)
+                        if state.selectedModIds.contains(mod.id) && state.selectedModIds.count > 1 {
+                            state.toggleSelectedMods()
+                        } else {
+                            state.handleModClick(mod, isShift: false, isCommand: false)
+                            state.toggleMod(mod)
+                        }
                         DispatchQueue.main.async {
                             NSApp.keyWindow?.makeFirstResponder(nil)
                         }
@@ -527,18 +536,38 @@ public struct ModTableView: View {
         .padding(.horizontal, 8)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(isSelected ? Color.accentColor.opacity(0.18) : Color.clear)
+                .fill(isSelected ? Color.accentColor.opacity(isPrimary ? 0.22 : 0.14) : Color.clear)
         )
         .contentShape(Rectangle())
         .onTapGesture {
-            state.selectedModId = mod.id
+            let flags = NSEvent.modifierFlags
+            state.handleModClick(
+                mod,
+                isShift: flags.contains(.shift),
+                isCommand: flags.contains(.command)
+            )
             DispatchQueue.main.async {
                 NSApp.keyWindow?.makeFirstResponder(nil)
             }
         }
         .id(mod.id)
         .contextMenu {
-            if mod.isCoreSMAPI {
+            let isBatch = state.selectedModIds.contains(mod.id) && state.selectedModIds.count > 1
+            if isBatch {
+                let count = state.selectedModIds.count
+                Label("\(count) Mods Selected", systemImage: "checklist")
+                Divider()
+                Button("Toggle Selected Mods (\(count)) (Space)") {
+                    state.toggleSelectedMods()
+                }
+                Button("Enable Selected Mods") {
+                    state.enableSelectedMods()
+                }
+                Button("Disable Selected Mods") {
+                    state.disableSelectedMods()
+                }
+                Divider()
+            } else if mod.isCoreSMAPI {
                 Label("Core SMAPI Component", systemImage: "shield.fill")
                 Text("Always active (required by SMAPI)")
                     .font(.caption)
@@ -656,12 +685,20 @@ public struct ModTableView: View {
 
             Divider()
 
-            Button(role: .destructive) {
-                state.promptDeleteMod(mod)
-            } label: {
-                Label("Delete Mod...", systemImage: "trash")
+            if isBatch {
+                Button(role: .destructive) {
+                    state.promptDeleteSelectedMods()
+                } label: {
+                    Label("Delete \(state.selectedModIds.count) Mods...", systemImage: "trash")
+                }
+            } else {
+                Button(role: .destructive) {
+                    state.promptDeleteMod(mod)
+                } label: {
+                    Label("Delete Mod...", systemImage: "trash")
+                }
+                .disabled(mod.isCoreSMAPI)
             }
-            .disabled(mod.isCoreSMAPI)
         }
     }
 
@@ -698,41 +735,78 @@ public struct ModTableView: View {
     private func setupEventMonitor() {
         guard eventMonitor == nil else { return }
         eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            // 1. If modifier keys like Cmd/Ctrl/Opt/Shift are pressed, let standard shortcuts handle them
-            let flags = event.modifierFlags.intersection([.command, .control, .option, .shift])
-            guard flags.isEmpty else { return event }
-
-            // 2. If the user is currently typing in an input field (Search bar, sheet text field, etc.), do not intercept
+            // 1. If the user is currently typing in an input field (Search bar, sheet text field, etc.), do not intercept
             if let responder = NSApp.keyWindow?.firstResponder,
                responder is NSTextView || responder is NSTextField || responder is NSText {
                 return event
             }
 
-            // 3. If any modal sheets or dialogs are presented, do not intercept
+            // 2. If any modal sheets or dialogs are presented, do not intercept
             guard !state.isSettingsPresented,
                   !state.isNewProfilePresented,
                   !state.isConfigEditorPresented,
                   !state.isNexusPresented,
                   !state.isAboutPresented,
                   !state.isNewSeparatorPresented,
-                  state.separatorToRename == nil else {
+                  state.separatorToRename == nil,
+                  state.modToDelete == nil else {
                 return event
             }
 
-            // 4. Spacebar (keyCode 49) -> Toggle selected mod
+            let flags = event.modifierFlags.intersection([.command, .control, .option, .shift])
+
+            // 3. Command shortcuts
+            if flags == [.command] {
+                // Command + A (keyCode 0) -> Select All
+                if event.keyCode == 0 {
+                    state.selectAllMods()
+                    return nil
+                }
+                return event
+            }
+
+            // 4. Shift shortcuts (Batch selection)
+            if flags == [.shift] {
+                // Shift + Down Arrow (keyCode 125) -> Extend selection down
+                if event.keyCode == 125 {
+                    if state.extendSelectionDown() {
+                        return nil
+                    }
+                }
+
+                // Shift + Up Arrow (keyCode 126) -> Extend selection up
+                if event.keyCode == 126 {
+                    if state.extendSelectionUp() {
+                        return nil
+                    }
+                }
+
+                // Shift + Space (keyCode 49) -> Toggle selected mods
+                if event.keyCode == 49 {
+                    state.toggleSelectedMods()
+                    return nil
+                }
+
+                return event
+            }
+
+            // 5. If other modifier combinations are pressed, let system handle them
+            guard flags.isEmpty else { return event }
+
+            // 6. Spacebar (keyCode 49) -> Toggle selected mod(s)
             if event.keyCode == 49 {
-                state.toggleSelectedMod()
+                state.toggleSelectedMods()
                 return nil // Handled, suppress system beep
             }
 
-            // 5. Down Arrow (keyCode 125) -> Navigate to next mod
+            // 7. Down Arrow (keyCode 125) -> Navigate to next mod
             if event.keyCode == 125 {
                 if state.selectNextMod() {
                     return nil
                 }
             }
 
-            // 6. Up Arrow (keyCode 126) -> Navigate to previous mod
+            // 8. Up Arrow (keyCode 126) -> Navigate to previous mod
             if event.keyCode == 126 {
                 if state.selectPreviousMod() {
                     return nil

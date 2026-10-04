@@ -9,6 +9,27 @@ public struct InspectorView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     // Header
                     VStack(alignment: .leading, spacing: 6) {
+                        if state.selectedModIds.count > 1 {
+                            HStack(spacing: 8) {
+                                Image(systemName: "checklist")
+                                    .font(.headline)
+                                    .foregroundStyle(.blue)
+                                Text("\(state.selectedModIds.count) mods selected")
+                                    .font(.subheadline.bold())
+                                Spacer()
+                                Button("Deselect") {
+                                    if let id = state.selectedModId {
+                                        state.selectedModIds = [id]
+                                        state.selectionAnchorId = id
+                                    }
+                                }
+                                .controlSize(.small)
+                            }
+                            .padding(8)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(Color.blue.opacity(0.12)))
+                            .padding(.bottom, 4)
+                        }
+
                         HStack {
                             Image(systemName: "shippingbox.fill")
                                 .font(.title)
@@ -311,16 +332,28 @@ public struct InspectorView: View {
                         Divider()
                             .padding(.vertical, 4)
 
-                        Button(role: .destructive) {
-                            state.promptDeleteMod(mod)
-                        } label: {
-                            Label("Delete Mod...", systemImage: "trash")
-                                .foregroundStyle(mod.isCoreSMAPI ? Color.secondary : Color.red)
-                                .frame(maxWidth: .infinity)
+                        if state.selectedModIds.count > 1 {
+                            Button(role: .destructive) {
+                                state.promptDeleteSelectedMods()
+                            } label: {
+                                Label("Delete \(state.selectedModIds.count) Selected Mods...", systemImage: "trash")
+                                    .foregroundStyle(Color.red)
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .controlSize(.regular)
+                            .help("Delete all selected mods from Mods directory")
+                        } else {
+                            Button(role: .destructive) {
+                                state.promptDeleteMod(mod)
+                            } label: {
+                                Label("Delete Mod...", systemImage: "trash")
+                                    .foregroundStyle(mod.isCoreSMAPI ? Color.secondary : Color.red)
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .controlSize(.regular)
+                            .disabled(mod.isCoreSMAPI)
+                            .help(mod.isCoreSMAPI ? "Core SMAPI components cannot be deleted" : "Delete mod from Mods directory")
                         }
-                        .controlSize(.regular)
-                        .disabled(mod.isCoreSMAPI)
-                        .help(mod.isCoreSMAPI ? "Core SMAPI components cannot be deleted" : "Delete mod from Mods directory")
                     }
                 }
                 .padding(16)

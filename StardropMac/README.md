@@ -18,11 +18,15 @@ A native macOS mod manager for [Stardew Valley](https://www.stardewvalley.net/) 
 - Bulk enable and disable mods within a specific separator.
 - Auto-generate separators based on mod folder structure (e.g. `[MODS] - Core`).
 
-### Mod Table & Quick Toggling
+### Mod Table, Multi-Selection & Quick Toggling
 - Unified mod list with status checkboxes and status indicator badges.
-- Clickable checkbox or status badge to toggle individual mods.
-- Spacebar shortcut to toggle the selected mod on or off.
-- Arrow key navigation (Up/Down) through visible mods in display order.
+- **Batch / Multi-Selection**:
+  - `Shift + Click` or `Shift + ↑/↓` to select contiguous ranges of mods.
+  - `⌘ + Click` to toggle individual mods into/out of selection.
+  - `⌘A` to select all visible mods.
+  - Context menu and inspector reflect the number of selected items with bulk enable, disable, and delete actions.
+- **Spacebar Toggle**: Press `Space` to toggle single or multiple selected mods. If any selected mod is disabled, pressing `Space` enables all of them; pressing again disables all of them.
+- Arrow key navigation (`↑`/`↓`) through visible mods in display order.
 - Intelligent focus management: search bar and text field typing do not trigger mod toggle shortcuts.
 
 ### SMAPI Core Component Protection
@@ -42,8 +46,8 @@ A native macOS mod manager for [Stardew Valley](https://www.stardewvalley.net/) 
 - Displays an installation summary with warnings, errors, and updated mod statuses.
 
 ### Mod Deletion & Dependency Safety
-- Delete mods directly from the right-click context menu or the inspector sidebar (`Delete Mod...`).
-- **Dependency Warning System**: Automatically detects if the mod to be deleted is a required dependency (`isRequired: true` or `contentPackFor`) of any currently enabled mods. If so, displays a detailed warning confirmation modal listing all dependent enabled mods before deletion.
+- Delete mods directly from the right-click context menu or the inspector sidebar (`Delete Mod...`). Supports batch deletion when multiple mods are selected.
+- **Dependency Warning System**: Automatically detects if any mod to be deleted is a required dependency (`isRequired: true` or `contentPackFor`) of any currently enabled mods. If so, displays a detailed warning confirmation modal listing all dependent enabled mods before deletion.
 - Moves deleted mod folders safely to the macOS Trash Bin.
 - Automatically cleans up references across profiles and separators, and selects an adjacent mod.
 - Core SMAPI components (`ConsoleCommands`, `SaveBackup`, `ErrorHandler`) are protected against accidental deletion.
@@ -74,8 +78,10 @@ A native macOS mod manager for [Stardew Valley](https://www.stardewvalley.net/) 
 
 | Shortcut | Action |
 | :--- | :--- |
-| `Space` | Toggle selected mod enabled/disabled |
+| `Space` | Toggle selected mod(s) enabled/disabled |
 | `↑` / `↓` | Navigate through mod list |
+| `⇧↑` / `⇧↓` | Expand / contract multi-selection range |
+| `⌘A` | Select all visible mods |
 | `⌘O` | Install mod archive (.zip, .7z, .rar, .tar.gz) or folder |
 | `⌘R` | Launch Stardew Valley with SMAPI |
 | `⌘U` | Check for mod updates |

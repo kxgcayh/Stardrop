@@ -15,6 +15,8 @@ public final class AppState: ObservableObject {
     @Published public var profiles: [Profile] = []
     @Published public var activeProfile: Profile
     @Published public var selectedModId: String?
+    @Published public var selectedModIds: Set<String> = []
+    @Published public var selectionAnchorId: String? = nil
     @Published public var searchText: String = ""
     @Published public var selectedCategory: SidebarCategory = .allMods
 
@@ -84,6 +86,10 @@ public final class AppState: ObservableObject {
         if self.selectedModId == nil {
             self.selectedModId = self.mods.first?.id
         }
+        if let first = self.selectedModId {
+            self.selectedModIds = [first]
+            self.selectionAnchorId = first
+        }
 
         if self.isNexusConnected {
             Task { [weak self] in
@@ -141,6 +147,21 @@ public final class AppState: ObservableObject {
         return mods.first { $0.id == id }
     }
 
+    public var selectedMods: [Mod] {
+        if selectedModIds.isEmpty {
+            if let single = selectedMod {
+                return [single]
+            }
+            return []
+        }
+        let set = selectedModIds
+        return visibleModsInDisplayOrder.filter { set.contains($0.id) }
+    }
+
+    public func isModSelected(_ modId: String) -> Bool {
+        selectedModIds.contains(modId) || selectedModId == modId
+    }
+
     public var visibleModsInDisplayOrder: [Mod] {
         if separators.isEmpty {
             return filteredMods
@@ -161,13 +182,111 @@ public final class AppState: ObservableObject {
         return result
     }
 
-    public func toggleSelectedMod() {
-        if let mod = selectedMod {
-            toggleMod(mod)
-        } else if let first = visibleModsInDisplayOrder.first {
-            selectedModId = first.id
-            toggleMod(first)
+    public func handleModClick(_ mod: Mod, isShift: Bool, isCommand: Bool) {
+        let list = visibleModsInDisplayOrder
+        guard !list.isEmpty else { return }
+
+        if isShift {
+            let anchorId = selectionAnchorId ?? selectedModId ?? mod.id
+            let anchorIdx = list.firstIndex(where: { $0.id.caseInsensitiveCompare(anchorId) == .orderedSame }) ?? 0
+            let targetIdx = list.firstIndex(where: { $0.id.caseInsensitiveCompare(mod.id) == .orderedSame }) ?? 0
+
+            let start = min(anchorIdx, targetIdx)
+            let end = max(anchorIdx, targetIdx)
+
+            var newSet = Set<String>()
+            for i in start...end {
+                newSet.insert(list[i].id)
+            }
+            self.selectedModIds = newSet
+            self.selectedModId = mod.id
+            if self.selectionAnchorId == nil {
+                self.selectionAnchorId = anchorId
+            }
+        } else if isCommand {
+            if selectedModIds.contains(mod.id) && selectedModIds.count > 1 {
+                selectedModIds.remove(mod.id)
+                if selectedModId == mod.id {
+                    selectedModId = selectedModIds.first
+                }
+            } else {
+                selectedModIds.insert(mod.id)
+                selectedModId = mod.id
+                selectionAnchorId = mod.id
+            }
+        } else {
+            selectedModIds = [mod.id]
+            selectedModId = mod.id
+            selectionAnchorId = mod.id
         }
+    }
+
+    public func selectAllMods() {
+        let list = visibleModsInDisplayOrder
+        guard !list.isEmpty else { return }
+        selectedModIds = Set(list.map { $0.id })
+        if selectedModId == nil || !selectedModIds.contains(selectedModId!) {
+            selectedModId = list.first?.id
+        }
+    }
+
+    public func toggleSelectedMods() {
+        let targets = selectedMods
+        guard !targets.isEmpty else {
+            if let first = visibleModsInDisplayOrder.first {
+                handleModClick(first, isShift: false, isCommand: false)
+                toggleMod(first)
+            }
+            return
+        }
+
+        if targets.count == 1 {
+            toggleMod(targets[0])
+            return
+        }
+
+        let nonCoreTargets = targets.filter { !$0.isCoreSMAPI }
+        guard !nonCoreTargets.isEmpty else { return }
+
+        // If any selected non-core mod is disabled, enable all of them.
+        // If all selected non-core mods are already enabled, disable all of them.
+        let shouldEnable = nonCoreTargets.contains { !$0.isEnabled }
+        let targetIdSet = Set(nonCoreTargets.map { $0.id.lowercased() })
+
+        for i in 0..<mods.count {
+            if targetIdSet.contains(mods[i].id.lowercased()) && !mods[i].isCoreSMAPI {
+                mods[i].isEnabled = shouldEnable
+            }
+        }
+        saveActiveProfileState()
+    }
+
+    public func toggleSelectedMod() {
+        toggleSelectedMods()
+    }
+
+    public func enableSelectedMods() {
+        let targets = selectedMods.filter { !$0.isCoreSMAPI }
+        guard !targets.isEmpty else { return }
+        let idSet = Set(targets.map { $0.id.lowercased() })
+        for i in 0..<mods.count {
+            if idSet.contains(mods[i].id.lowercased()) && !mods[i].isCoreSMAPI {
+                mods[i].isEnabled = true
+            }
+        }
+        saveActiveProfileState()
+    }
+
+    public func disableSelectedMods() {
+        let targets = selectedMods.filter { !$0.isCoreSMAPI }
+        guard !targets.isEmpty else { return }
+        let idSet = Set(targets.map { $0.id.lowercased() })
+        for i in 0..<mods.count {
+            if idSet.contains(mods[i].id.lowercased()) && !mods[i].isCoreSMAPI {
+                mods[i].isEnabled = false
+            }
+        }
+        saveActiveProfileState()
     }
 
     @discardableResult
@@ -176,14 +295,21 @@ public final class AppState: ObservableObject {
         guard !list.isEmpty else { return false }
         guard let currentId = selectedModId,
               let currentIndex = list.firstIndex(where: { $0.id.caseInsensitiveCompare(currentId) == .orderedSame }) else {
-            selectedModId = list.first?.id
-            if let id = selectedModId { scrollTargetModId = id }
-            return true
+            if let first = list.first {
+                selectedModId = first.id
+                selectedModIds = [first.id]
+                selectionAnchorId = first.id
+                scrollTargetModId = first.id
+                return true
+            }
+            return false
         }
         let nextIndex = min(currentIndex + 1, list.count - 1)
         if nextIndex != currentIndex {
             let nextMod = list[nextIndex]
             selectedModId = nextMod.id
+            selectedModIds = [nextMod.id]
+            selectionAnchorId = nextMod.id
             scrollTargetModId = nextMod.id
             return true
         }
@@ -196,18 +322,81 @@ public final class AppState: ObservableObject {
         guard !list.isEmpty else { return false }
         guard let currentId = selectedModId,
               let currentIndex = list.firstIndex(where: { $0.id.caseInsensitiveCompare(currentId) == .orderedSame }) else {
-            selectedModId = list.first?.id
-            if let id = selectedModId { scrollTargetModId = id }
-            return true
+            if let first = list.first {
+                selectedModId = first.id
+                selectedModIds = [first.id]
+                selectionAnchorId = first.id
+                scrollTargetModId = first.id
+                return true
+            }
+            return false
         }
         let prevIndex = max(currentIndex - 1, 0)
         if prevIndex != currentIndex {
             let prevMod = list[prevIndex]
             selectedModId = prevMod.id
+            selectedModIds = [prevMod.id]
+            selectionAnchorId = prevMod.id
             scrollTargetModId = prevMod.id
             return true
         }
         return false
+    }
+
+    @discardableResult
+    public func extendSelectionDown() -> Bool {
+        let list = visibleModsInDisplayOrder
+        guard !list.isEmpty else { return false }
+
+        let currentId = selectedModId ?? list.first!.id
+        let currentIndex = list.firstIndex(where: { $0.id.caseInsensitiveCompare(currentId) == .orderedSame }) ?? 0
+
+        let anchorId = selectionAnchorId ?? currentId
+        let anchorIndex = list.firstIndex(where: { $0.id.caseInsensitiveCompare(anchorId) == .orderedSame }) ?? currentIndex
+        self.selectionAnchorId = list[anchorIndex].id
+
+        let newIndex = min(currentIndex + 1, list.count - 1)
+        guard newIndex != currentIndex || selectedModIds.count <= 1 else { return false }
+
+        let start = min(anchorIndex, newIndex)
+        let end = max(anchorIndex, newIndex)
+
+        var newSet = Set<String>()
+        for i in start...end {
+            newSet.insert(list[i].id)
+        }
+        self.selectedModIds = newSet
+        self.selectedModId = list[newIndex].id
+        self.scrollTargetModId = list[newIndex].id
+        return true
+    }
+
+    @discardableResult
+    public func extendSelectionUp() -> Bool {
+        let list = visibleModsInDisplayOrder
+        guard !list.isEmpty else { return false }
+
+        let currentId = selectedModId ?? list.first!.id
+        let currentIndex = list.firstIndex(where: { $0.id.caseInsensitiveCompare(currentId) == .orderedSame }) ?? 0
+
+        let anchorId = selectionAnchorId ?? currentId
+        let anchorIndex = list.firstIndex(where: { $0.id.caseInsensitiveCompare(anchorId) == .orderedSame }) ?? currentIndex
+        self.selectionAnchorId = list[anchorIndex].id
+
+        let newIndex = max(currentIndex - 1, 0)
+        guard newIndex != currentIndex || selectedModIds.count <= 1 else { return false }
+
+        let start = min(anchorIndex, newIndex)
+        let end = max(anchorIndex, newIndex)
+
+        var newSet = Set<String>()
+        for i in start...end {
+            newSet.insert(list[i].id)
+        }
+        self.selectedModIds = newSet
+        self.selectedModId = list[newIndex].id
+        self.scrollTargetModId = list[newIndex].id
+        return true
     }
 
     // MARK: - Actions
@@ -306,6 +495,8 @@ public final class AppState: ObservableObject {
 
         // Set selected mod ID
         selectedModId = targetMod.id
+        selectedModIds = [targetMod.id]
+        selectionAnchorId = targetMod.id
 
         // Trigger scroll notification
         scrollTargetModId = nil
@@ -841,11 +1032,15 @@ public final class AppState: ObservableObject {
     // MARK: - Mod Deletion & Dependency Verification
 
     public func findEnabledDependents(for mod: Mod) -> [Mod] {
-        let targetId = mod.id.lowercased()
+        findEnabledDependents(forMods: [mod])
+    }
+
+    public func findEnabledDependents(forMods targets: [Mod]) -> [Mod] {
+        let targetIdSet = Set(targets.map { $0.id.lowercased() })
         return mods.filter { other in
-            guard other.id.lowercased() != targetId, other.isEnabled else { return false }
+            guard !targetIdSet.contains(other.id.lowercased()), other.isEnabled else { return false }
             return other.manifest.allDependencies.contains { dep in
-                dep.isRequired && dep.uniqueID.caseInsensitiveCompare(targetId) == .orderedSame
+                dep.isRequired && targetIdSet.contains(dep.uniqueID.lowercased())
             }
         }
     }
@@ -859,37 +1054,48 @@ public final class AppState: ObservableObject {
         self.modToDelete = ModDeletionPrompt(mod: mod, dependentMods: dependents)
     }
 
-    public func confirmDeleteMod() {
-        guard let prompt = modToDelete else { return }
-        let mod = prompt.mod
-        self.modToDelete = nil
-        deleteMod(mod)
+    public func promptDeleteSelectedMods() {
+        let targets = selectedMods.filter { !$0.isCoreSMAPI }
+        guard !targets.isEmpty else {
+            if let first = selectedMod, first.isCoreSMAPI {
+                self.modInstallResultAlert = "Core SMAPI component '\(first.name)' cannot be deleted as it is required by SMAPI."
+            }
+            return
+        }
+
+        if targets.count == 1 {
+            promptDeleteMod(targets[0])
+            return
+        }
+
+        let dependents = findEnabledDependents(forMods: targets)
+        self.modToDelete = ModDeletionPrompt(mods: targets, dependentMods: dependents)
     }
 
-    public func deleteMod(_ mod: Mod) {
-        guard !mod.isCoreSMAPI else { return }
+    public func confirmDeleteMod() {
+        guard let prompt = modToDelete else { return }
+        let toDelete = prompt.mods
+        self.modToDelete = nil
+        deleteMods(toDelete)
+    }
 
-        // 1. If currently selected, select another mod in display order
-        if selectedModId == mod.id {
-            let list = visibleModsInDisplayOrder
-            if let idx = list.firstIndex(where: { $0.id == mod.id }) {
-                if idx + 1 < list.count {
-                    selectedModId = list[idx + 1].id
-                } else if idx - 1 >= 0 {
-                    selectedModId = list[idx - 1].id
-                } else {
-                    selectedModId = nil
-                }
-            } else {
-                selectedModId = nil
-            }
+    public func deleteMods(_ modsToDelete: [Mod]) {
+        let fileManager = FileManager.default
+        let deleteIds = Set(modsToDelete.filter { !$0.isCoreSMAPI }.map { $0.id.lowercased() })
+        guard !deleteIds.isEmpty else { return }
+
+        // 1. Deselect deleted mods
+        selectedModIds = selectedModIds.filter { !deleteIds.contains($0.lowercased()) }
+        if let current = selectedModId, deleteIds.contains(current.lowercased()) {
+            selectedModId = selectedModIds.first
+            selectionAnchorId = selectedModId
         }
 
         // 2. Remove from active profile and all saved profiles
         let savedProfiles = profileService.loadProfiles()
         for var p in savedProfiles {
             let originalCount = p.enabledModIds.count
-            p.enabledModIds.removeAll { $0.uniqueId.caseInsensitiveCompare(mod.id) == .orderedSame }
+            p.enabledModIds.removeAll { deleteIds.contains($0.uniqueId.lowercased()) }
             if p.enabledModIds.count != originalCount {
                 profileService.saveProfile(p)
             }
@@ -901,21 +1107,26 @@ public final class AppState: ObservableObject {
 
         // 3. Remove from separators
         for i in 0..<separators.count {
-            separators[i].modIds.removeAll { $0.caseInsensitiveCompare(mod.id) == .orderedSame }
+            separators[i].modIds.removeAll { deleteIds.contains($0.lowercased()) }
         }
         saveSeparatorsState()
 
-        // 4. Move mod directory to Trash (or fallback to remove item)
-        let fileManager = FileManager.default
-        if fileManager.fileExists(atPath: mod.directoryURL.path) {
-            do {
-                try fileManager.trashItem(at: mod.directoryURL, resultingItemURL: nil)
-            } catch {
-                try? fileManager.removeItem(at: mod.directoryURL)
+        // 4. Move mod directories to Trash
+        for mod in modsToDelete where !mod.isCoreSMAPI {
+            if fileManager.fileExists(atPath: mod.directoryURL.path) {
+                do {
+                    try fileManager.trashItem(at: mod.directoryURL, resultingItemURL: nil)
+                } catch {
+                    try? fileManager.removeItem(at: mod.directoryURL)
+                }
             }
         }
 
         // 5. Refresh mod list
         refreshMods()
+    }
+
+    public func deleteMod(_ mod: Mod) {
+        deleteMods([mod])
     }
 }
