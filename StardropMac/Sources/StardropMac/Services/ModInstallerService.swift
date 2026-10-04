@@ -171,7 +171,7 @@ public final class ModInstallerService {
         )
     }
 
-    private func extractArchive(at sourceURL: URL, to destinationURL: URL) throws {
+    public func extractArchive(at sourceURL: URL, to destinationURL: URL) throws {
         let ext = sourceURL.pathExtension.lowercased()
         let process = Process()
         let pipe = Pipe()

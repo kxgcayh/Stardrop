@@ -187,6 +187,9 @@ public struct MainView: View {
         .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
             handleDrop(providers: providers)
         }
+        .onOpenURL { url in
+            state.handleOpenURL(url)
+        }
         .modifier(MainNotificationsModifier(state: state))
     }
 
@@ -314,6 +317,21 @@ private struct MainSheetsModifier: ViewModifier {
             }
             .sheet(item: $state.separatorToRename) { separator in
                 RenameSeparatorSheet(state: state, separator: separator)
+            }
+            .sheet(isPresented: $state.isCollectionInstallPresented) {
+                if let package = state.activeCollectionPackage {
+                    CollectionInstallSheet(
+                        state: state,
+                        manifest: package.manifest,
+                        contentURL: package.contentURL,
+                        isTemporary: package.isTemporary
+                    )
+                }
+            }
+            .sheet(isPresented: $state.isFreeUserQueuePresented) {
+                if let manager = state.activeQueueManager {
+                    FreeUserQueueSheet(state: state, manager: manager)
+                }
             }
     }
 }

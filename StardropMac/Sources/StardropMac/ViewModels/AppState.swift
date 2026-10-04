@@ -45,6 +45,28 @@ public final class AppState: ObservableObject {
     @Published public var pendingNewSeparatorModId: String? = nil
     @Published public var separatorToRename: ModSeparator? = nil
 
+    public struct ActiveCollectionPackage: Identifiable {
+        public let id = UUID()
+        public let manifest: CollectionManifest
+        public let contentURL: URL
+        public let isTemporary: Bool
+
+        public init(manifest: CollectionManifest, contentURL: URL, isTemporary: Bool) {
+            self.manifest = manifest
+            self.contentURL = contentURL
+            self.isTemporary = isTemporary
+        }
+    }
+
+    @Published public var activeCollectionPackage: ActiveCollectionPackage?
+    @Published public var isCollectionInstallPresented: Bool = false
+    @Published public var activeQueueManager: CollectionQueueManager?
+    @Published public var isFreeUserQueuePresented: Bool = false
+
+    public var isPremiumNexusUser: Bool {
+        settings.nexusDetails.isPremium
+    }
+
     public var areAllSeparatorsExpanded: Bool {
         guard !separators.isEmpty else { return true }
         return separators.allSatisfy { $0.isExpanded }
@@ -575,6 +597,13 @@ public final class AppState: ObservableObject {
         saveActiveProfileState()
     }
 
+    public func selectProfile(named name: String) {
+        self.profiles = profileService.loadProfiles()
+        if let target = self.profiles.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
+            selectProfile(target)
+        }
+    }
+
     public func createProfile(name: String) {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -968,6 +997,23 @@ public final class AppState: ObservableObject {
     public func installMods(from urls: [URL]) async {
         guard !urls.isEmpty else { return }
 
+        // Check if single URL is a Nexus Collection archive or directory
+        if urls.count == 1, let firstURL = urls.first {
+            if CollectionService.shared.isCollectionFile(at: firstURL) {
+                if let inspected = try? CollectionService.shared.inspect(url: firstURL) {
+                    await MainActor.run {
+                        self.activeCollectionPackage = ActiveCollectionPackage(
+                            manifest: inspected.manifest,
+                            contentURL: inspected.contentURL,
+                            isTemporary: inspected.isTemporary
+                        )
+                        self.isCollectionInstallPresented = true
+                    }
+                    return
+                }
+            }
+        }
+
         await MainActor.run {
             self.isInstallingMods = true
             self.modInstallProgressMessage = "Installing \(urls.count) item\(urls.count == 1 ? "" : "s")..."
@@ -1026,6 +1072,252 @@ public final class AppState: ObservableObject {
                 self.modInstallProgressMessage = nil
                 self.modInstallResultAlert = "Failed to install mods: \(error.localizedDescription)"
             }
+        }
+    }
+
+    // MARK: - Free User Download Queue & Collection Assistant
+
+    @MainActor
+    public func startFreeUserQueue(
+        mods: [CollectionMod],
+        targetProfileName: String,
+        separatorName: String,
+        collectionName: String
+    ) {
+        let manager = CollectionQueueManager(
+            mods: mods,
+            targetProfileName: targetProfileName,
+            separatorName: separatorName,
+            collectionName: collectionName
+        )
+        self.activeQueueManager = manager
+        self.isFreeUserQueuePresented = true
+        manager.startQueue()
+    }
+
+    @MainActor
+    public func applyCompletedQueue(manager: CollectionQueueManager) {
+        refreshMods()
+
+        let installedItems = manager.items.filter { $0.status == .installed }
+        guard !installedItems.isEmpty else { return }
+
+        var installedUniqueIds: [String] = []
+        for item in installedItems {
+            if let matched = self.mods.first(where: { m in
+                if let modId = item.mod.source.modId, let existingNexusId = m.nexusModId {
+                    if existingNexusId == modId { return true }
+                }
+                return m.name.caseInsensitiveCompare(item.mod.name) == .orderedSame ||
+                       m.id.caseInsensitiveCompare(item.mod.name) == .orderedSame
+            }) {
+                installedUniqueIds.append(matched.id)
+            }
+        }
+
+        guard !installedUniqueIds.isEmpty else { return }
+
+        // Ensure profile exists or update it
+        self.profiles = profileService.loadProfiles()
+        var targetProfile = self.profiles.first(where: { $0.name.caseInsensitiveCompare(manager.targetProfileName) == .orderedSame })
+        if targetProfile == nil {
+            let newProf = Profile(name: manager.targetProfileName, enabledModIds: [])
+            profileService.saveProfile(newProf)
+            targetProfile = newProf
+            self.profiles = profileService.loadProfiles()
+        }
+
+        if var prof = targetProfile {
+            for uniqueId in installedUniqueIds {
+                if !prof.enabledModIds.contains(where: { $0.uniqueId.caseInsensitiveCompare(uniqueId) == .orderedSame }) {
+                    prof.enabledModIds.append(ModReference(uniqueId: uniqueId))
+                }
+            }
+            profileService.saveProfile(prof)
+            self.profiles = profileService.loadProfiles()
+        }
+
+        // Add to collection separator
+        var existingSeparators = separatorService.loadSeparators(for: manager.targetProfileName)
+        let sepName = manager.separatorName
+        if let idx = existingSeparators.firstIndex(where: { $0.name.caseInsensitiveCompare(sepName) == .orderedSame }) {
+            var set = Set(existingSeparators[idx].modIds)
+            for uniqueId in installedUniqueIds {
+                set.insert(uniqueId)
+            }
+            existingSeparators[idx].modIds = Array(set)
+        } else {
+            let newSep = ModSeparator(name: sepName, isExpanded: true, modIds: installedUniqueIds)
+            existingSeparators.append(newSep)
+        }
+        separatorService.saveSeparators(existingSeparators, for: manager.targetProfileName)
+
+        selectProfile(named: manager.targetProfileName)
+        refreshMods()
+    }
+
+    // MARK: - NXM Deep Link Handler
+
+    @MainActor
+    public func handleOpenURL(_ url: URL) {
+        let parsed = NXMUrlParser.parse(url)
+        switch parsed {
+        case .mod(let gameId, let modId, let fileId, let key, let expires, _):
+            Task { @MainActor in
+                await handleIncomingModDownload(
+                    gameDomain: gameId,
+                    modId: modId,
+                    fileId: fileId,
+                    key: key,
+                    expires: expires
+                )
+            }
+
+        case .collection(let gameId, let slug, let revisionNumber):
+            Task { @MainActor in
+                await handleIncomingCollection(
+                    gameId: gameId,
+                    slug: slug,
+                    revisionNumber: revisionNumber
+                )
+            }
+
+        case .unknown(let urlStr):
+            print("Unhandled NXM or URL: \(urlStr)")
+        }
+    }
+
+    private func handleIncomingModDownload(
+        gameDomain: String,
+        modId: Int,
+        fileId: Int,
+        key: String?,
+        expires: Int?
+    ) async {
+        if let queueManager = self.activeQueueManager {
+            let handled = await queueManager.handleIncomingNXM(
+                gameId: gameDomain,
+                modId: modId,
+                fileId: fileId,
+                key: key,
+                expires: expires,
+                apiKey: self.nexusApiKey,
+                modsDirectory: self.modsDirectory,
+                existingMods: self.mods
+            )
+            if handled {
+                return
+            }
+        }
+
+        self.isInstallingMods = true
+        self.modInstallProgressMessage = "Downloading mod \(modId)..."
+
+        let cacheDir = pathing.collectionDownloadsURL
+        try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        let destinationFile = cacheDir.appendingPathComponent("\(modId)_\(fileId).zip")
+
+        do {
+            let apiKeyToUse = self.nexusApiKey ?? ""
+            let links = try await NexusService.shared.getModDownloadURLs(
+                gameDomain: gameDomain,
+                modId: modId,
+                fileId: fileId,
+                apiKey: apiKeyToUse.isEmpty ? (key ?? "") : apiKeyToUse,
+                key: key,
+                expires: expires
+            )
+
+            guard let primary = links.first?.uri, let downloadURL = URL(string: primary) else {
+                throw NSError(domain: "NXMDownload", code: 404, userInfo: [NSLocalizedDescriptionKey: "No download mirrors returned."])
+            }
+
+            try await NexusService.shared.downloadFile(from: downloadURL, to: destinationFile) { progress in
+                Task { @MainActor in
+                    self.modInstallProgressMessage = "Downloading mod (\(Int(progress * 100))%)..."
+                }
+            }
+
+            self.modInstallProgressMessage = "Installing mod..."
+            let summary = try await ModInstallerService.shared.installMods(
+                from: [destinationFile],
+                into: self.modsDirectory,
+                existingMods: self.mods
+            )
+
+            self.isInstallingMods = false
+            self.modInstallProgressMessage = nil
+            self.refreshMods()
+
+            if let first = summary.installedMods.first {
+                self.selectAndRevealMod(id: first.uniqueID)
+                self.modInstallResultAlert = "Successfully installed \(first.modName) v\(first.version)."
+            }
+        } catch {
+            self.isInstallingMods = false
+            self.modInstallProgressMessage = nil
+            self.modInstallResultAlert = "Failed to download mod from Nexus: \(error.localizedDescription)"
+        }
+    }
+
+    private func handleIncomingCollection(
+        gameId: String,
+        slug: String,
+        revisionNumber: Int?
+    ) async {
+        self.isInstallingMods = true
+        self.modInstallProgressMessage = "Fetching collection '\(slug)' metadata..."
+
+        do {
+            let revData = try await NexusService.shared.getCollectionRevision(
+                slug: slug,
+                revision: revisionNumber,
+                domainName: gameId,
+                apiKey: self.nexusApiKey
+            )
+
+            guard let downloadLink = revData.downloadLink, !downloadLink.isEmpty else {
+                throw NSError(domain: "NXMCollection", code: 404, userInfo: [NSLocalizedDescriptionKey: "No download link available for this collection revision."])
+            }
+
+            self.modInstallProgressMessage = "Resolving collection download..."
+            let mirrors = try await NexusService.shared.getCollectionDownloadURLs(
+                from: downloadLink,
+                apiKey: self.nexusApiKey
+            )
+
+            guard let firstMirror = mirrors.first?.uri, let downloadURL = URL(string: firstMirror) else {
+                throw NSError(domain: "NXMCollection", code: 404, userInfo: [NSLocalizedDescriptionKey: "No download mirror returned for collection archive."])
+            }
+
+            let cacheDir = pathing.collectionDownloadsURL
+            try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+            let revNumStr = revData.revisionNumber != nil ? "_\(revData.revisionNumber!)" : ""
+            let archiveDest = cacheDir.appendingPathComponent("\(slug)\(revNumStr).7z")
+
+            self.modInstallProgressMessage = "Downloading collection package..."
+            try await NexusService.shared.downloadFile(from: downloadURL, to: archiveDest) { progress in
+                Task { @MainActor in
+                    self.modInstallProgressMessage = "Downloading collection package (\(Int(progress * 100))%)..."
+                }
+            }
+
+            self.modInstallProgressMessage = "Inspecting collection..."
+            let inspected = try CollectionService.shared.inspect(url: archiveDest)
+
+            self.isInstallingMods = false
+            self.modInstallProgressMessage = nil
+
+            self.activeCollectionPackage = ActiveCollectionPackage(
+                manifest: inspected.manifest,
+                contentURL: inspected.contentURL,
+                isTemporary: inspected.isTemporary
+            )
+            self.isCollectionInstallPresented = true
+        } catch {
+            self.isInstallingMods = false
+            self.modInstallProgressMessage = nil
+            self.modInstallResultAlert = "Failed to load collection from Nexus: \(error.localizedDescription)"
         }
     }
 

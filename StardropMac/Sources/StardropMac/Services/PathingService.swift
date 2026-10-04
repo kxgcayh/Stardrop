@@ -32,6 +32,10 @@ public final class PathingService {
         homeURL.appendingPathComponent("Cache", isDirectory: true)
     }
 
+    public var collectionDownloadsURL: URL {
+        cacheURL.appendingPathComponent("CollectionDownloads", isDirectory: true)
+    }
+
     public var smapiLogURL: URL {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return home.appendingPathComponent(".config/StardewValley/ErrorLogs/SMAPI-latest.txt")
