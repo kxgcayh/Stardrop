@@ -34,9 +34,18 @@ A native macOS mod manager for [Stardew Valley](https://www.stardewvalley.net/) 
 - Displays available version updates with direct download links.
 - Filter category to view only mods with updates available.
 
-### Nexus Mods Integration
+### Mod Archive Installation (.zip, .7z, .rar, .tar.gz)
+- Drag and drop archives (`.zip`, `.7z`, `.rar`, `.tar.gz`) or uncompressed mod folders directly into the app window.
+- Manual file selection via `⌘O`, toolbar `+` button, mod table context menu, or the empty-state button.
+- Automatic decompression, nested SMAPI manifest discovery, and clean installation into the active Mods directory.
+- Preserves existing user `config.json` files when upgrading existing mods.
+- Displays an installation summary with warnings, errors, and updated mod statuses.
+
+### Nexus Mods Integration & Endorsements
 - Optional personal API key validation with Nexus Mods.
 - Displays account details and membership tier (Free / Premium).
+- Full encryption/decryption compatibility with C# Stardrop (`Settings.json` and AES-256-CBC obscurity keys in `Cache/Notion.json`).
+- View endorsement status and endorse or abstain directly from the mod list or inspector panel.
 - Direct links to Nexus mod pages.
 
 ### Profile Management
@@ -60,6 +69,7 @@ A native macOS mod manager for [Stardew Valley](https://www.stardewvalley.net/) 
 | :--- | :--- |
 | `Space` | Toggle selected mod enabled/disabled |
 | `↑` / `↓` | Navigate through mod list |
+| `⌘O` | Install mod archive (.zip, .7z, .rar, .tar.gz) or folder |
 | `⌘R` | Launch Stardew Valley with SMAPI |
 | `⌘U` | Check for mod updates |
 | `⌘,` | Open Preferences / Settings |
