@@ -41,6 +41,13 @@ A native macOS mod manager for [Stardew Valley](https://www.stardewvalley.net/) 
 - Preserves existing user `config.json` files when upgrading existing mods.
 - Displays an installation summary with warnings, errors, and updated mod statuses.
 
+### Mod Deletion & Dependency Safety
+- Delete mods directly from the right-click context menu or the inspector sidebar (`Delete Mod...`).
+- **Dependency Warning System**: Automatically detects if the mod to be deleted is a required dependency (`isRequired: true` or `contentPackFor`) of any currently enabled mods. If so, displays a detailed warning confirmation modal listing all dependent enabled mods before deletion.
+- Moves deleted mod folders safely to the macOS Trash Bin.
+- Automatically cleans up references across profiles and separators, and selects an adjacent mod.
+- Core SMAPI components (`ConsoleCommands`, `SaveBackup`, `ErrorHandler`) are protected against accidental deletion.
+
 ### Nexus Mods Integration & Endorsements
 - Optional personal API key validation with Nexus Mods.
 - Displays account details and membership tier (Free / Premium).

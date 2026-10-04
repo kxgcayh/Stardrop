@@ -32,6 +32,7 @@ public final class AppState: ObservableObject {
     @Published public var isInstallingMods: Bool = false
     @Published public var modInstallProgressMessage: String? = nil
     @Published public var modInstallResultAlert: String? = nil
+    @Published public var modToDelete: ModDeletionPrompt? = nil
 
     public var availableUpdatesCount: Int {
         mods.filter { $0.hasUpdate }.count
@@ -835,5 +836,86 @@ public final class AppState: ObservableObject {
                 self.modInstallResultAlert = "Failed to install mods: \(error.localizedDescription)"
             }
         }
+    }
+
+    // MARK: - Mod Deletion & Dependency Verification
+
+    public func findEnabledDependents(for mod: Mod) -> [Mod] {
+        let targetId = mod.id.lowercased()
+        return mods.filter { other in
+            guard other.id.lowercased() != targetId, other.isEnabled else { return false }
+            return other.manifest.allDependencies.contains { dep in
+                dep.isRequired && dep.uniqueID.caseInsensitiveCompare(targetId) == .orderedSame
+            }
+        }
+    }
+
+    public func promptDeleteMod(_ mod: Mod) {
+        guard !mod.isCoreSMAPI else {
+            self.modInstallResultAlert = "Core SMAPI component '\(mod.name)' cannot be deleted as it is required by SMAPI."
+            return
+        }
+        let dependents = findEnabledDependents(for: mod)
+        self.modToDelete = ModDeletionPrompt(mod: mod, dependentMods: dependents)
+    }
+
+    public func confirmDeleteMod() {
+        guard let prompt = modToDelete else { return }
+        let mod = prompt.mod
+        self.modToDelete = nil
+        deleteMod(mod)
+    }
+
+    public func deleteMod(_ mod: Mod) {
+        guard !mod.isCoreSMAPI else { return }
+
+        // 1. If currently selected, select another mod in display order
+        if selectedModId == mod.id {
+            let list = visibleModsInDisplayOrder
+            if let idx = list.firstIndex(where: { $0.id == mod.id }) {
+                if idx + 1 < list.count {
+                    selectedModId = list[idx + 1].id
+                } else if idx - 1 >= 0 {
+                    selectedModId = list[idx - 1].id
+                } else {
+                    selectedModId = nil
+                }
+            } else {
+                selectedModId = nil
+            }
+        }
+
+        // 2. Remove from active profile and all saved profiles
+        let savedProfiles = profileService.loadProfiles()
+        for var p in savedProfiles {
+            let originalCount = p.enabledModIds.count
+            p.enabledModIds.removeAll { $0.uniqueId.caseInsensitiveCompare(mod.id) == .orderedSame }
+            if p.enabledModIds.count != originalCount {
+                profileService.saveProfile(p)
+            }
+        }
+        self.profiles = profileService.loadProfiles()
+        if let current = self.profiles.first(where: { $0.id == activeProfile.id }) {
+            self.activeProfile = current
+        }
+
+        // 3. Remove from separators
+        for i in 0..<separators.count {
+            separators[i].modIds.removeAll { $0.caseInsensitiveCompare(mod.id) == .orderedSame }
+        }
+        saveSeparatorsState()
+
+        // 4. Move mod directory to Trash (or fallback to remove item)
+        let fileManager = FileManager.default
+        if fileManager.fileExists(atPath: mod.directoryURL.path) {
+            do {
+                try fileManager.trashItem(at: mod.directoryURL, resultingItemURL: nil)
+            } catch {
+                try? fileManager.removeItem(at: mod.directoryURL)
+            }
+        }
+
+        // 5. Refresh mod list
+        refreshMods()
     }
 }

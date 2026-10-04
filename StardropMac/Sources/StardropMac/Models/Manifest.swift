@@ -114,6 +114,28 @@ public struct ModManifest: Codable, Hashable {
         case contentPackFor = "ContentPackFor"
     }
 
+    public init(
+        name: String,
+        author: String = "Unknown Author",
+        version: String = "1.0.0",
+        description: String? = nil,
+        uniqueID: String,
+        entryDll: String? = nil,
+        updateKeys: [String] = [],
+        dependencies: [ManifestDependency] = [],
+        contentPackFor: ManifestContentPackFor? = nil
+    ) {
+        self.name = name
+        self.author = author
+        self.version = version
+        self.description = description
+        self.uniqueID = uniqueID
+        self.entryDll = entryDll
+        self.updateKeys = updateKeys
+        self.dependencies = dependencies
+        self.contentPackFor = contentPackFor
+    }
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: DynamicCodingKey.self)
         self.name = container.decodeCaseInsensitive(String.self, forKey: "Name") ?? "Unnamed Mod"

@@ -336,6 +336,13 @@ private struct MainAlertsModifier: ViewModifier {
         )
     }
 
+    private var modDeletionBinding: Binding<Bool> {
+        Binding(
+            get: { state.modToDelete != nil },
+            set: { if !$0 { state.modToDelete = nil } }
+        )
+    }
+
     func body(content: Content) -> some View {
         content
             .onChange(of: state.launcher.launchError) { _, error in
@@ -361,6 +368,16 @@ private struct MainAlertsModifier: ViewModifier {
                 }
             } message: {
                 Text(state.modInstallResultAlert ?? "")
+            }
+            .alert(state.modToDelete?.title ?? "Delete Mod", isPresented: modDeletionBinding) {
+                Button("Cancel", role: .cancel) {
+                    state.modToDelete = nil
+                }
+                Button("Delete", role: .destructive) {
+                    state.confirmDeleteMod()
+                }
+            } message: {
+                Text(state.modToDelete?.message ?? "")
             }
     }
 }

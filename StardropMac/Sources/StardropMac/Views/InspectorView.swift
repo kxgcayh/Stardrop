@@ -307,6 +307,20 @@ public struct InspectorView: View {
                             .disabled(mod.isEndorsing)
                             .help(mod.isEndorsed ? "Click to remove endorsement (abstain)" : (state.isNexusConnected ? "Click to endorse on Nexus Mods" : "Connect Nexus Mods in Settings to endorse"))
                         }
+
+                        Divider()
+                            .padding(.vertical, 4)
+
+                        Button(role: .destructive) {
+                            state.promptDeleteMod(mod)
+                        } label: {
+                            Label("Delete Mod...", systemImage: "trash")
+                                .foregroundStyle(mod.isCoreSMAPI ? Color.secondary : Color.red)
+                                .frame(maxWidth: .infinity)
+                        }
+                        .controlSize(.regular)
+                        .disabled(mod.isCoreSMAPI)
+                        .help(mod.isCoreSMAPI ? "Core SMAPI components cannot be deleted" : "Delete mod from Mods directory")
                     }
                 }
                 .padding(16)

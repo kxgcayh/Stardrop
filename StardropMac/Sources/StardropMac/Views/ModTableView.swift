@@ -653,6 +653,15 @@ public struct ModTableView: View {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(mod.id, forType: .string)
             }
+
+            Divider()
+
+            Button(role: .destructive) {
+                state.promptDeleteMod(mod)
+            } label: {
+                Label("Delete Mod...", systemImage: "trash")
+            }
+            .disabled(mod.isCoreSMAPI)
         }
     }
 
