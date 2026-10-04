@@ -51,11 +51,24 @@ public final class AppState: ObservableObject {
         public let manifest: CollectionManifest
         public let contentURL: URL
         public let isTemporary: Bool
+        public let slug: String?
+        public let revisionNumber: Int?
+        public let domainName: String?
 
-        public init(manifest: CollectionManifest, contentURL: URL, isTemporary: Bool) {
+        public init(
+            manifest: CollectionManifest,
+            contentURL: URL,
+            isTemporary: Bool,
+            slug: String? = nil,
+            revisionNumber: Int? = nil,
+            domainName: String? = nil
+        ) {
             self.manifest = manifest
             self.contentURL = contentURL
             self.isTemporary = isTemporary
+            self.slug = slug
+            self.revisionNumber = revisionNumber
+            self.domainName = domainName
         }
     }
 
@@ -63,6 +76,9 @@ public final class AppState: ObservableObject {
     @Published public var isCollectionInstallPresented: Bool = false
     @Published public var activeQueueManager: CollectionQueueManager?
     @Published public var isFreeUserQueuePresented: Bool = false
+    @Published public var installedCollections: [InstalledCollection] = []
+    @Published public var isCheckingCollectionUpdates: Bool = false
+    @Published public var collectionPendingRemoval: InstalledCollection? = nil
 
     public var isPremiumNexusUser: Bool {
         settings.nexusDetails.isPremium
@@ -113,6 +129,8 @@ public final class AppState: ObservableObject {
             self.selectedModIds = [first]
             self.selectionAnchorId = first
         }
+
+        self.installedCollections = CollectionPersistenceService.shared.loadCollections()
 
         if self.isNexusConnected {
             Task { [weak self] in
@@ -425,6 +443,13 @@ public final class AppState: ObservableObject {
     // MARK: - Actions
 
     public func refreshMods() {
+        if let freshActive = profileService.loadProfiles().first(where: { $0.id == activeProfile.id }) {
+            self.activeProfile = freshActive
+            if let idx = self.profiles.firstIndex(where: { $0.id == freshActive.id }) {
+                self.profiles[idx] = freshActive
+            }
+        }
+
         let enabledSet = Set(activeProfile.enabledModIds.map { $0.uniqueId.lowercased() })
         let previousUpdates = Dictionary(mods.compactMap { mod -> (String, (String?, URL?))? in
             guard mod.suggestedVersion != nil else { return nil }
@@ -561,30 +586,32 @@ public final class AppState: ObservableObject {
     }
 
     public func selectProfile(_ profile: Profile) {
-        // If already selected, ensure state is saved and avoid stale overwrite
-        if profile.id == activeProfile.id {
+        // 1. If switching from a different profile, save the previous active profile's state first
+        if profile.id != activeProfile.id {
             saveActiveProfileState()
             saveSeparatorsState()
-            return
         }
 
-        // 1. Save current active profile state and separators before switching
-        saveActiveProfileState()
-        saveSeparatorsState()
-
-        // 2. Fetch latest version of target profile
-        let target = profiles.first(where: { $0.id == profile.id })
-            ?? profileService.loadProfiles().first(where: { $0.id == profile.id })
+        // 2. Load the freshest version of the target profile from disk
+        let target = profileService.loadProfiles().first(where: { $0.id == profile.id })
+            ?? profiles.first(where: { $0.id == profile.id })
             ?? profile
 
         self.activeProfile = target
         self.settings.lastSelectedProfileName = target.name
         settingsService.saveSettings(self.settings)
 
-        // 3. Load separators for the newly active profile
+        // 3. Keep in-memory profiles array in sync
+        if let idx = self.profiles.firstIndex(where: { $0.id == target.id }) {
+            self.profiles[idx] = target
+        } else {
+            self.profiles.append(target)
+        }
+
+        // 4. Load separators for the newly active profile
         self.separators = separatorService.loadSeparators(for: target.name)
 
-        // 4. Apply enabled states for the selected profile, preserving core SMAPI mods
+        // 5. Apply enabled states for the selected profile, preserving core SMAPI mods
         let enabledSet = Set(target.enabledModIds.map { $0.uniqueId.lowercased() })
         for i in 0..<mods.count {
             if mods[i].isCoreSMAPI {
@@ -593,9 +620,6 @@ public final class AppState: ObservableObject {
                 mods[i].isEnabled = enabledSet.contains(mods[i].id.lowercased())
             }
         }
-
-        // 5. Ensure memory and disk states are synced
-        saveActiveProfileState()
     }
 
     public func selectProfile(named name: String) {
@@ -634,6 +658,17 @@ public final class AppState: ObservableObject {
         profileService.deleteProfile(profile)
         separatorService.deleteSeparators(for: profile.name)
         self.profiles = profileService.loadProfiles()
+
+        // Clean up any collections dedicated to this deleted profile
+        let dedicatedCols = installedCollections.filter {
+            $0.profileName.caseInsensitiveCompare(profile.name) == .orderedSame && $0.isDedicatedProfile
+        }
+        for col in dedicatedCols {
+            CollectionPersistenceService.shared.removeCollection(id: col.id)
+        }
+        if !dedicatedCols.isEmpty {
+            refreshInstalledCollections()
+        }
 
         if isDeletingActive {
             if let first = profiles.first {
@@ -715,9 +750,19 @@ public final class AppState: ObservableObject {
 
     public func saveActiveProfileState() {
         let existingMap = Dictionary(activeProfile.enabledModIds.map { ($0.uniqueId.lowercased(), $0) }, uniquingKeysWith: { first, _ in first })
-        let enabledRefs = mods.filter { $0.isEnabled }.map { mod in
+        let knownModsSet = Set(mods.map { $0.id.lowercased() })
+
+        var enabledRefs = mods.filter { $0.isEnabled }.map { mod in
             existingMap[mod.id.lowercased()] ?? ModReference(uniqueId: mod.id)
         }
+
+        // Preserve any references in activeProfile that are not currently present in mods
+        for ref in activeProfile.enabledModIds {
+            if !knownModsSet.contains(ref.uniqueId.lowercased()) {
+                enabledRefs.append(ref)
+            }
+        }
+
         activeProfile.enabledModIds = enabledRefs
 
         // Keep in-memory profiles array in sync
@@ -729,6 +774,51 @@ public final class AppState: ObservableObject {
 
         // Persist to disk
         profileService.saveProfile(activeProfile)
+    }
+
+    @MainActor
+    public func addInstalledModsToProfile(named profileName: String, uniqueIds: [String]) {
+        guard !uniqueIds.isEmpty else { return }
+        let cleanName = profileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanName.isEmpty else { return }
+
+        // 1. Ensure latest profiles from disk
+        let allProfiles = profileService.loadProfiles()
+        var targetProfile: Profile
+
+        if let existing = allProfiles.first(where: { $0.name.caseInsensitiveCompare(cleanName) == .orderedSame }) {
+            targetProfile = existing
+        } else {
+            targetProfile = Profile(name: cleanName, enabledModIds: [])
+        }
+
+        // 2. Add unique IDs without duplicates (case-insensitive)
+        for uid in uniqueIds {
+            if !targetProfile.enabledModIds.contains(where: { $0.uniqueId.caseInsensitiveCompare(uid) == .orderedSame }) {
+                targetProfile.enabledModIds.append(ModReference(uniqueId: uid))
+            }
+        }
+
+        // 3. Save to disk
+        profileService.saveProfile(targetProfile)
+        self.profiles = profileService.loadProfiles()
+
+        // 4. If this is the active profile, update activeProfile directly
+        if activeProfile.name.caseInsensitiveCompare(cleanName) == .orderedSame {
+            self.activeProfile = targetProfile
+            refreshMods()
+
+            // 6. Explicitly ensure activeProfile and mods in memory have all new IDs enabled
+            let targetIdSet = Set(uniqueIds.map { $0.lowercased() })
+            for i in 0..<mods.count {
+                if targetIdSet.contains(mods[i].id.lowercased()) {
+                    mods[i].isEnabled = true
+                }
+            }
+            saveActiveProfileState()
+        } else {
+            refreshMods()
+        }
     }
 
     // MARK: - Separator Actions
@@ -1041,7 +1131,8 @@ public final class AppState: ObservableObject {
                 self.isInstallingMods = false
                 self.modInstallProgressMessage = nil
 
-                self.refreshMods()
+                let installedIds = summary.installedMods.map { $0.uniqueID }
+                self.addInstalledModsToProfile(named: self.activeProfile.name, uniqueIds: installedIds)
 
                 if let first = summary.installedMods.first {
                     self.selectAndRevealMod(id: first.uniqueID)
@@ -1093,7 +1184,11 @@ public final class AppState: ObservableObject {
         mods: [CollectionMod],
         targetProfileName: String,
         separatorName: String,
-        collectionName: String
+        collectionName: String,
+        slug: String? = nil,
+        revisionNumber: Int? = nil,
+        domainName: String? = nil,
+        isDedicatedProfile: Bool = false
     ) {
         let smapiVersion = self.settings.gameDetails?.smapiVersion
         let manager = CollectionQueueManager(
@@ -1101,8 +1196,13 @@ public final class AppState: ObservableObject {
             targetProfileName: targetProfileName,
             separatorName: separatorName,
             collectionName: collectionName,
+            slug: slug,
+            revisionNumber: revisionNumber,
+            domainName: domainName,
             existingMods: self.mods,
-            currentSMAPIVersion: smapiVersion
+            currentSMAPIVersion: smapiVersion,
+            modsDirectory: self.modsDirectory,
+            isDedicatedProfile: isDedicatedProfile
         )
         self.activeQueueManager = manager
         self.isFreeUserQueuePresented = true
@@ -1123,8 +1223,15 @@ public final class AppState: ObservableObject {
         var installedUniqueIds: [String] = []
         let smapiVersion = self.settings.gameDetails?.smapiVersion
         for item in installedItems {
+            for uid in item.installedUniqueIds {
+                if !installedUniqueIds.contains(where: { $0.caseInsensitiveCompare(uid) == .orderedSame }) {
+                    installedUniqueIds.append(uid)
+                }
+            }
             if let matched = item.mod.findMatchingMod(in: self.mods, currentSMAPIVersion: smapiVersion) {
-                installedUniqueIds.append(matched.id)
+                if !installedUniqueIds.contains(where: { $0.caseInsensitiveCompare(matched.id) == .orderedSame }) {
+                    installedUniqueIds.append(matched.id)
+                }
             }
         }
 
@@ -1134,25 +1241,8 @@ public final class AppState: ObservableObject {
             return
         }
 
-        // Ensure profile exists or update it
-        self.profiles = profileService.loadProfiles()
-        var targetProfile = self.profiles.first(where: { $0.name.caseInsensitiveCompare(manager.targetProfileName) == .orderedSame })
-        if targetProfile == nil {
-            let newProf = Profile(name: manager.targetProfileName, enabledModIds: [])
-            profileService.saveProfile(newProf)
-            targetProfile = newProf
-            self.profiles = profileService.loadProfiles()
-        }
-
-        if var prof = targetProfile {
-            for uniqueId in installedUniqueIds {
-                if !prof.enabledModIds.contains(where: { $0.uniqueId.caseInsensitiveCompare(uniqueId) == .orderedSame }) {
-                    prof.enabledModIds.append(ModReference(uniqueId: uniqueId))
-                }
-            }
-            profileService.saveProfile(prof)
-            self.profiles = profileService.loadProfiles()
-        }
+        // Add mods to target profile and save to disk
+        addInstalledModsToProfile(named: manager.targetProfileName, uniqueIds: installedUniqueIds)
 
         // Add to collection separator
         var existingSeparators = separatorService.loadSeparators(for: manager.targetProfileName)
@@ -1169,11 +1259,166 @@ public final class AppState: ObservableObject {
         }
         separatorService.saveSeparators(existingSeparators, for: manager.targetProfileName)
 
+        // Track or update InstalledCollection record if slug is present
+        if let slug = manager.slug, !slug.isEmpty {
+            let domain = manager.domainName ?? "stardewvalley"
+            let collectionRecord = InstalledCollection(
+                slug: slug,
+                domainName: domain,
+                revisionNumber: manager.revisionNumber ?? 1,
+                name: manager.collectionName,
+                installedDate: Date(),
+                profileName: manager.targetProfileName,
+                installedModIds: installedUniqueIds,
+                isDedicatedProfile: manager.isDedicatedProfile
+            )
+            CollectionPersistenceService.shared.addOrUpdateCollection(collectionRecord)
+            refreshInstalledCollections()
+        }
+
         self.activeQueueManager = nil
         self.isFreeUserQueuePresented = false
 
         selectProfile(named: manager.targetProfileName)
         refreshMods()
+    }
+
+    // MARK: - Installed Collections & Updates
+
+    public func refreshInstalledCollections() {
+        self.installedCollections = CollectionPersistenceService.shared.loadCollections()
+    }
+
+    public func checkForCollectionUpdates(userInitiated: Bool = true) async {
+        let collections = CollectionPersistenceService.shared.loadCollections()
+        guard !collections.isEmpty else {
+            if userInitiated {
+                await MainActor.run {
+                    self.updateCheckMessage = "No collections are currently installed."
+                }
+            }
+            return
+        }
+
+        await MainActor.run {
+            self.isCheckingCollectionUpdates = true
+        }
+
+        var updateCount = 0
+        for col in collections {
+            var mutableCol = col
+            do {
+                let latestRev = try await NexusService.shared.getCollectionRevision(
+                    slug: col.slug,
+                    revision: nil,
+                    domainName: col.domainName,
+                    apiKey: self.nexusApiKey
+                )
+                mutableCol.lastCheckedDate = Date()
+                if let latestNum = latestRev.revisionNumber {
+                    mutableCol.latestRevisionNumber = latestNum
+                    if latestNum > col.revisionNumber {
+                        updateCount += 1
+                    }
+                }
+            } catch {
+                print("Failed to check update for collection \(col.slug): \(error)")
+            }
+            CollectionPersistenceService.shared.addOrUpdateCollection(mutableCol)
+        }
+
+        await MainActor.run {
+            self.refreshInstalledCollections()
+            self.isCheckingCollectionUpdates = false
+            if userInitiated {
+                if updateCount > 0 {
+                    self.updateCheckMessage = "\(updateCount) collection update\(updateCount == 1 ? "" : "s") available."
+                } else {
+                    self.updateCheckMessage = "All installed collections are up to date."
+                }
+            }
+        }
+    }
+
+    public func checkForCollectionUpdate(for collection: InstalledCollection) async {
+        await MainActor.run {
+            self.isCheckingCollectionUpdates = true
+        }
+
+        var mutableCol = collection
+        do {
+            let latestRev = try await NexusService.shared.getCollectionRevision(
+                slug: collection.slug,
+                revision: nil,
+                domainName: collection.domainName,
+                apiKey: self.nexusApiKey
+            )
+            mutableCol.lastCheckedDate = Date()
+            if let latestNum = latestRev.revisionNumber {
+                mutableCol.latestRevisionNumber = latestNum
+            }
+            CollectionPersistenceService.shared.addOrUpdateCollection(mutableCol)
+
+            await MainActor.run {
+                self.refreshInstalledCollections()
+                self.isCheckingCollectionUpdates = false
+                if let latestNum = latestRev.revisionNumber, latestNum > collection.revisionNumber {
+                    self.updateCheckMessage = "Revision \(latestNum) is available for '\(collection.name)' (currently on revision \(collection.revisionNumber))."
+                } else {
+                    self.updateCheckMessage = "'\(collection.name)' is up to date (revision \(collection.revisionNumber))."
+                }
+            }
+        } catch {
+            await MainActor.run {
+                self.refreshInstalledCollections()
+                self.isCheckingCollectionUpdates = false
+                self.updateCheckMessage = "Failed to check update for '\(collection.name)': \(error.localizedDescription)"
+            }
+        }
+    }
+
+    public func updateCollection(_ collection: InstalledCollection) {
+        let targetRev = collection.latestRevisionNumber ?? (collection.revisionNumber + 1)
+        Task { @MainActor in
+            await self.handleIncomingCollection(
+                gameId: collection.domainName,
+                slug: collection.slug,
+                revisionNumber: targetRev
+            )
+        }
+    }
+
+    public func promptRemoveCollection(_ collection: InstalledCollection) {
+        self.collectionPendingRemoval = collection
+    }
+
+    public func canDeleteAssociatedProfile(for collection: InstalledCollection) -> Bool {
+        guard let prof = profiles.first(where: { $0.name.caseInsensitiveCompare(collection.profileName) == .orderedSame }) else {
+            return false
+        }
+        guard !prof.isProtected else {
+            return false
+        }
+        return collection.isDedicatedProfile || collection.profileName.hasPrefix("[Collection]")
+    }
+
+    public func confirmRemoveCollection(deleteProfile: Bool) {
+        guard let collection = collectionPendingRemoval else { return }
+
+        CollectionPersistenceService.shared.removeCollection(id: collection.id)
+        refreshInstalledCollections()
+
+        if deleteProfile {
+            if let prof = profiles.first(where: { $0.name.caseInsensitiveCompare(collection.profileName) == .orderedSame }), !prof.isProtected {
+                self.deleteProfile(prof)
+            }
+        }
+
+        self.collectionPendingRemoval = nil
+    }
+
+    public func deleteCollectionRecord(_ collection: InstalledCollection) {
+        promptRemoveCollection(collection)
     }
 
     // MARK: - NXM Deep Link Handler
@@ -1271,7 +1516,20 @@ public final class AppState: ObservableObject {
 
             self.isInstallingMods = false
             self.modInstallProgressMessage = nil
-            self.refreshMods()
+
+            let installedIds = summary.installedMods.map { $0.uniqueID }
+            self.addInstalledModsToProfile(named: self.activeProfile.name, uniqueIds: installedIds)
+
+            if let queueManager = self.activeQueueManager {
+                for item in queueManager.items where !item.status.isTerminal {
+                    if item.mod.source.modId == modId || item.status == .awaitingBrowser {
+                        item.installedUniqueIds = installedIds
+                        item.status = .installed
+                        queueManager.advanceToNextPending()
+                        break
+                    }
+                }
+            }
 
             if let first = summary.installedMods.first {
                 self.selectAndRevealMod(id: first.uniqueID)
@@ -1343,7 +1601,10 @@ public final class AppState: ObservableObject {
             self.activeCollectionPackage = ActiveCollectionPackage(
                 manifest: inspected.manifest,
                 contentURL: inspected.contentURL,
-                isTemporary: inspected.isTemporary
+                isTemporary: inspected.isTemporary,
+                slug: slug,
+                revisionNumber: revData.revisionNumber ?? revisionNumber,
+                domainName: gameId
             )
             self.isCollectionInstallPresented = true
         } catch {

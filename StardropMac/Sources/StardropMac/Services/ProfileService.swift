@@ -48,10 +48,16 @@ public final class ProfileService {
         Profile(name: "Default", isProtected: true, enabledModIds: [])
     }
 
+    private func safeFilename(for name: String) -> String {
+        name.replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: " -")
+    }
+
     public func saveProfile(_ profile: Profile) {
         pathing.ensureDirectoriesExist()
 
-        let fileURL = pathing.profilesURL.appendingPathComponent("\(profile.name).json")
+        let safe = safeFilename(for: profile.name)
+        let fileURL = pathing.profilesURL.appendingPathComponent("\(safe).json")
         do {
             let data = try jsonEncoder.encode(profile)
             try data.write(to: fileURL, options: .atomic)
@@ -62,7 +68,8 @@ public final class ProfileService {
 
     public func deleteProfile(_ profile: Profile) {
         guard !profile.isProtected else { return }
-        let fileURL = pathing.profilesURL.appendingPathComponent("\(profile.name).json")
+        let safe = safeFilename(for: profile.name)
+        let fileURL = pathing.profilesURL.appendingPathComponent("\(safe).json")
         try? FileManager.default.removeItem(at: fileURL)
     }
 

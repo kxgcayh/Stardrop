@@ -73,6 +73,20 @@ public struct SidebarView: View {
                 }
             }
 
+            Section("Collections") {
+                if state.installedCollections.isEmpty {
+                    Text("No collections installed")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                } else {
+                    ForEach(state.installedCollections) { collection in
+                        CollectionSidebarRow(state: state, collection: collection)
+                    }
+                }
+            }
+
             Section("Profiles") {
                 ForEach(state.profiles) { profile in
                     ProfileSidebarRow(state: state, profile: profile)
@@ -125,6 +139,16 @@ public struct SidebarView: View {
                     Label(state.isCheckingUpdates ? "Checking Updates..." : "Check for Mod Updates", systemImage: "arrow.triangle.2.circlepath")
                 }
                 .disabled(state.isCheckingUpdates)
+                .buttonStyle(.plain)
+
+                Button {
+                    Task {
+                        await state.checkForCollectionUpdates(userInitiated: true)
+                    }
+                } label: {
+                    Label(state.isCheckingCollectionUpdates ? "Checking Collection Updates..." : "Check Collection Updates", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .disabled(state.isCheckingCollectionUpdates || state.installedCollections.isEmpty)
                 .buttonStyle(.plain)
 
                 Button {
@@ -238,6 +262,103 @@ public struct ProfileSidebarRow: View {
                 Button("Delete Profile", role: .destructive) {
                     state.deleteProfile(profile)
                 }
+            }
+        }
+    }
+}
+
+public struct CollectionSidebarRow: View {
+    @ObservedObject var state: AppState
+    let collection: InstalledCollection
+    @State private var isHovered: Bool = false
+
+    public var body: some View {
+        let isProfileActive = state.activeProfile.name.caseInsensitiveCompare(collection.profileName) == .orderedSame
+
+        Button {
+            state.selectProfile(named: collection.profileName)
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "square.stack.3d.up.fill")
+                    .font(.system(size: 13))
+                    .foregroundStyle(isProfileActive ? Color.purple : Color.secondary)
+                    .frame(width: 16)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(collection.name)
+                        .font(.system(size: 13, weight: isProfileActive ? .semibold : .regular))
+                        .foregroundStyle(isProfileActive ? Color.primary : (isHovered ? Color.primary : Color.secondary))
+                        .lineLimit(1)
+
+                    HStack(spacing: 4) {
+                        Text("Revision \(collection.revisionNumber)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+
+                        if collection.hasUpdate, let latest = collection.latestRevisionNumber {
+                            Text("Update (r\(latest))")
+                                .font(.caption2.bold())
+                                .padding(.horizontal, 4)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(Color.orange))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                }
+
+                Spacer()
+
+                if isProfileActive {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.purple)
+                }
+            }
+            .padding(.vertical, 5)
+            .padding(.horizontal, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isProfileActive ? Color.purple.opacity(0.12) : (isHovered ? Color.secondary.opacity(0.1) : Color.clear))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            withAnimation(.easeInOut(duration: 0.12)) {
+                isHovered = hovering
+            }
+        }
+        .listRowInsets(EdgeInsets(top: 2, leading: 6, bottom: 2, trailing: 6))
+        .listRowBackground(Color.clear)
+        .contextMenu {
+            Button("Switch to Profile '\(collection.profileName)'") {
+                state.selectProfile(named: collection.profileName)
+            }
+
+            if collection.hasUpdate {
+                Button("Update Collection to Revision \(collection.latestRevisionNumber ?? (collection.revisionNumber + 1))...") {
+                    state.updateCollection(collection)
+                }
+            }
+
+            Button("Check for Updates") {
+                Task {
+                    await state.checkForCollectionUpdate(for: collection)
+                }
+            }
+
+            Divider()
+
+            if let nexusURL = collection.nexusURL {
+                Button("Open on Nexus Mods") {
+                    NSWorkspace.shared.open(nexusURL)
+                }
+            }
+
+            Divider()
+
+            Button("Remove from Collections", role: .destructive) {
+                state.promptRemoveCollection(collection)
             }
         }
     }

@@ -43,10 +43,12 @@ public final class CollectionQueueItem: ObservableObject, Identifiable {
     public let id = UUID()
     public let mod: CollectionMod
     @Published public var status: QueueItemStatus
+    public var installedUniqueIds: [String] = []
 
-    public init(mod: CollectionMod, status: QueueItemStatus = .pending) {
+    public init(mod: CollectionMod, status: QueueItemStatus = .pending, installedUniqueIds: [String] = []) {
         self.mod = mod
         self.status = status
+        self.installedUniqueIds = installedUniqueIds
     }
 }
 
@@ -62,6 +64,12 @@ public final class CollectionQueueManager: ObservableObject {
     public let targetProfileName: String
     public let separatorName: String
     public let collectionName: String
+    public let slug: String?
+    public let revisionNumber: Int?
+    public let domainName: String?
+    public let modsDirectory: URL?
+    public let smapiVersion: String?
+    public let isDedicatedProfile: Bool
     public var onFinished: (() -> Void)?
 
     public var currentItem: CollectionQueueItem? {
@@ -89,15 +97,26 @@ public final class CollectionQueueManager: ObservableObject {
         targetProfileName: String,
         separatorName: String,
         collectionName: String,
+        slug: String? = nil,
+        revisionNumber: Int? = nil,
+        domainName: String? = nil,
         existingMods: [Mod] = [],
-        currentSMAPIVersion: String? = nil
+        currentSMAPIVersion: String? = nil,
+        modsDirectory: URL? = nil,
+        isDedicatedProfile: Bool = false
     ) {
         self.targetProfileName = targetProfileName
         self.separatorName = separatorName
         self.collectionName = collectionName
+        self.slug = slug
+        self.revisionNumber = revisionNumber
+        self.domainName = domainName
+        self.modsDirectory = modsDirectory
+        self.smapiVersion = currentSMAPIVersion
+        self.isDedicatedProfile = isDedicatedProfile
         self.items = mods.map { mod in
-            if mod.isInstalled(in: existingMods, currentSMAPIVersion: currentSMAPIVersion) {
-                return CollectionQueueItem(mod: mod, status: .installed)
+            if let matched = mod.findMatchingMod(in: existingMods, currentSMAPIVersion: currentSMAPIVersion) {
+                return CollectionQueueItem(mod: mod, status: .installed, installedUniqueIds: [matched.id])
             } else {
                 return CollectionQueueItem(mod: mod, status: .pending)
             }
@@ -115,6 +134,22 @@ public final class CollectionQueueManager: ObservableObject {
 
     public func openInBrowser(item: CollectionQueueItem) {
         guard !item.status.isTerminal else { return }
+
+        // Check if mod was already installed on disk before opening browser
+        if let dir = modsDirectory {
+            let scanned = ModScannerService.shared.scanMods(in: dir)
+            if let matched = item.mod.findMatchingMod(in: scanned, currentSMAPIVersion: smapiVersion) {
+                item.installedUniqueIds = [matched.id]
+                item.status = .installed
+                statusMessage = "\(item.mod.name) is already installed."
+                advanceToNextPending()
+                if autoOpenNext, isRunning, let next = currentItem {
+                    openInBrowser(item: next)
+                }
+                return
+            }
+        }
+
         guard let modId = item.mod.source.modId, let fileId = item.mod.source.fileId else {
             item.status = .skipped
             advanceToNextPending()
@@ -165,12 +200,12 @@ public final class CollectionQueueManager: ObservableObject {
         modsDirectory: URL,
         existingMods: [Mod]
     ) async -> Bool {
-        // Find matching item in queue: exact modId + fileId, or fallback to modId
+        // Find matching item in queue: exact modId + fileId, fallback to modId, fallback to currentItem awaiting browser, or fallback to any item awaiting browser
         guard let item = items.first(where: {
             $0.mod.source.modId == modId && $0.mod.source.fileId == fileId && !$0.status.isTerminal
         }) ?? items.first(where: {
             $0.mod.source.modId == modId && !$0.status.isTerminal
-        }) else {
+        }) ?? (currentItem?.status == .awaitingBrowser ? currentItem : nil) ?? items.first(where: { $0.status == .awaitingBrowser }) else {
             return false
         }
 
@@ -209,8 +244,16 @@ public final class CollectionQueueManager: ObservableObject {
             }
 
             statusMessage = "Installing \(item.mod.name)..."
-            _ = try await ModInstallerService.shared.installMods(from: [cacheFile], into: modsDirectory, existingMods: existingMods)
+            let summary = try await ModInstallerService.shared.installMods(from: [cacheFile], into: modsDirectory, existingMods: existingMods)
 
+            var ids = summary.installedMods.map { $0.uniqueID }
+            if ids.isEmpty {
+                let scannedMods = ModScannerService.shared.scanMods(in: modsDirectory)
+                if let matched = item.mod.findMatchingMod(in: scannedMods, currentSMAPIVersion: smapiVersion) {
+                    ids = [matched.id]
+                }
+            }
+            item.installedUniqueIds = ids
             item.status = .installed
             statusMessage = "Installed \(item.mod.name)."
 

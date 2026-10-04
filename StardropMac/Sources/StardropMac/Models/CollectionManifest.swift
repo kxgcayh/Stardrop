@@ -325,8 +325,95 @@ public struct VersionHelper {
     }
 }
 
+public struct CollectionModRuleReference: Codable, Hashable {
+    public let fileExpression: String?
+    public let fileMD5: String?
+    public let versionMatch: String?
+    public let idHint: String?
+    public let tag: String?
+    public let logicalFileName: String?
+
+    public func matches(_ mod: CollectionMod) -> Bool {
+        if let t = tag, let modTag = mod.source.tag, t.caseInsensitiveCompare(modTag) == .orderedSame {
+            return true
+        }
+        if let expr = fileExpression, let modExpr = mod.source.fileExpression, expr.caseInsensitiveCompare(modExpr) == .orderedSame {
+            return true
+        }
+        if let logName = logicalFileName, let modLog = mod.source.logicalFilename, logName.caseInsensitiveCompare(modLog) == .orderedSame {
+            return true
+        }
+        if let hint = idHint, mod.id.caseInsensitiveCompare(hint) == .orderedSame || mod.name.caseInsensitiveCompare(hint) == .orderedSame {
+            return true
+        }
+        if let md5 = fileMD5, let modMd5 = mod.source.md5, md5.caseInsensitiveCompare(modMd5) == .orderedSame {
+            return true
+        }
+        return false
+    }
+
+    public func matches(_ mod: Mod) -> Bool {
+        if let hint = idHint {
+            if mod.id.caseInsensitiveCompare(hint) == .orderedSame ||
+               mod.name.caseInsensitiveCompare(hint) == .orderedSame {
+                return true
+            }
+        }
+        if let logName = logicalFileName {
+            if mod.name.caseInsensitiveCompare(logName) == .orderedSame {
+                return true
+            }
+        }
+        return false
+    }
+
+    public var displayName: String {
+        idHint ?? logicalFileName ?? fileExpression ?? tag ?? "Specified mod"
+    }
+}
+
 public struct CollectionModRule: Codable, Hashable {
-    public let type: String?
+    public let type: String
+    public let source: CollectionModRuleReference?
+    public let reference: CollectionModRuleReference?
+
+    public var isConflict: Bool {
+        type.caseInsensitiveCompare("conflicts") == .orderedSame
+    }
+
+    public var isRequirement: Bool {
+        type.caseInsensitiveCompare("requires") == .orderedSame
+    }
+
+    public var isRecommendation: Bool {
+        type.caseInsensitiveCompare("recommends") == .orderedSame || type.caseInsensitiveCompare("recommend") == .orderedSame
+    }
+
+    public var isOrdering: Bool {
+        type.caseInsensitiveCompare("before") == .orderedSame || type.caseInsensitiveCompare("after") == .orderedSame
+    }
+}
+
+public struct CollectionRuleNotice: Identifiable, Hashable {
+    public enum NoticeLevel: String, Codable {
+        case conflict
+        case missingRequirement
+        case recommendation
+        case ordering
+    }
+
+    public let id = UUID()
+    public let level: NoticeLevel
+    public let sourceModName: String
+    public let targetModName: String
+    public let message: String
+
+    public init(level: NoticeLevel, sourceModName: String, targetModName: String, message: String) {
+        self.level = level
+        self.sourceModName = sourceModName
+        self.targetModName = targetModName
+        self.message = message
+    }
 }
 
 public struct CollectionManifest: Codable {
@@ -346,5 +433,94 @@ public struct CollectionManifest: Codable {
 
     public var optionalMods: [CollectionMod] {
         mods.filter { $0.optional }
+    }
+
+    public func evaluateRules(existingMods: [Mod]) -> [CollectionRuleNotice] {
+        guard let rules = modRules, !rules.isEmpty else { return [] }
+        var notices: [CollectionRuleNotice] = []
+        var seenMessages = Set<String>()
+
+        for rule in rules {
+            let sourceName: String
+            if let srcRef = rule.source {
+                if let mod = mods.first(where: { srcRef.matches($0) }) {
+                    sourceName = mod.name
+                } else if let inst = existingMods.first(where: { srcRef.matches($0) }) {
+                    sourceName = inst.name
+                } else {
+                    sourceName = srcRef.displayName
+                }
+            } else {
+                sourceName = info.name
+            }
+
+            let targetName: String
+            let isTargetPresentInCollection: Bool
+            let isTargetPresentInLibrary: Bool
+
+            if let targetRef = rule.reference {
+                if let mod = mods.first(where: { targetRef.matches($0) }) {
+                    targetName = mod.name
+                    isTargetPresentInCollection = true
+                    isTargetPresentInLibrary = false
+                } else if let inst = existingMods.first(where: { targetRef.matches($0) }) {
+                    targetName = inst.name
+                    isTargetPresentInCollection = false
+                    isTargetPresentInLibrary = true
+                } else {
+                    targetName = targetRef.displayName
+                    isTargetPresentInCollection = false
+                    isTargetPresentInLibrary = false
+                }
+            } else {
+                targetName = "Unknown mod"
+                isTargetPresentInCollection = false
+                isTargetPresentInLibrary = false
+            }
+
+            if rule.isConflict {
+                if isTargetPresentInCollection || isTargetPresentInLibrary {
+                    let loc = isTargetPresentInLibrary ? "already installed in your library" : "also included in this collection"
+                    let msg = "\(sourceName) conflicts with \(targetName) (\(loc))."
+                    if !seenMessages.contains(msg) {
+                        seenMessages.insert(msg)
+                        notices.append(CollectionRuleNotice(
+                            level: .conflict,
+                            sourceModName: sourceName,
+                            targetModName: targetName,
+                            message: msg
+                        ))
+                    }
+                }
+            } else if rule.isRequirement {
+                if !isTargetPresentInCollection && !isTargetPresentInLibrary {
+                    let msg = "\(sourceName) requires \(targetName), which is not present in this collection or your library."
+                    if !seenMessages.contains(msg) {
+                        seenMessages.insert(msg)
+                        notices.append(CollectionRuleNotice(
+                            level: .missingRequirement,
+                            sourceModName: sourceName,
+                            targetModName: targetName,
+                            message: msg
+                        ))
+                    }
+                }
+            } else if rule.isRecommendation {
+                if !isTargetPresentInCollection && !isTargetPresentInLibrary {
+                    let msg = "\(sourceName) recommends \(targetName) for an optimal experience."
+                    if !seenMessages.contains(msg) {
+                        seenMessages.insert(msg)
+                        notices.append(CollectionRuleNotice(
+                            level: .recommendation,
+                            sourceModName: sourceName,
+                            targetModName: targetName,
+                            message: msg
+                        ))
+                    }
+                }
+            }
+        }
+
+        return notices
     }
 }

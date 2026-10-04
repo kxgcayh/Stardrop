@@ -102,6 +102,9 @@ public final class CollectionService {
         isPremium: Bool,
         existingMods: [Mod],
         modsDirectory: URL,
+        slug: String? = nil,
+        revisionNumber: Int? = nil,
+        currentSMAPIVersion: String? = nil,
         onProgress: @escaping @Sendable (String, Double) -> Void
     ) async throws -> CollectionInstallSummary {
         let fileManager = FileManager.default
@@ -124,7 +127,7 @@ public final class CollectionService {
             let stepProgress = 1.0 / totalCount
 
             // 1. Check if mod is already installed
-            if let matched = colMod.findMatchingMod(in: existingMods) {
+            if let matched = colMod.findMatchingMod(in: existingMods, currentSMAPIVersion: currentSMAPIVersion) {
                 alreadyInstalledCount += 1
                 newlyInstalledUniqueIds.append(matched.id)
                 onProgress("Already installed: \(colMod.name)", baseProgress + stepProgress)
@@ -238,6 +241,13 @@ public final class CollectionService {
             }
         }
 
+        // 3.5 Apply Curator Overrides & Patches
+        let overridesDir = contentRootURL.appendingPathComponent("overrides")
+        if fileManager.fileExists(atPath: overridesDir.path) {
+            onProgress("Applying curator file overrides...", 0.92)
+            applyCuratorOverrides(from: overridesDir, into: modsDirectory, installedResults: installedResults, warnings: &warnings)
+        }
+
         // 4. Manage Profile and Separator Grouping
         let finalProfileName = targetProfileName.trimmingCharacters(in: .whitespacesAndNewlines)
         let separatorName = "[Collection] \(manifest.info.name)"
@@ -246,14 +256,14 @@ public final class CollectionService {
         var profiles = profileService.loadProfiles()
         var targetProfile: Profile
 
-        if createNewProfile || !profiles.contains(where: { $0.name == finalProfileName }) {
+        if createNewProfile || !profiles.contains(where: { $0.name.caseInsensitiveCompare(finalProfileName) == .orderedSame }) {
             var newProfile = Profile(name: finalProfileName)
             for uid in newlyInstalledUniqueIds {
                 newProfile.enabledModIds.append(ModReference(uniqueId: uid))
             }
             targetProfile = newProfile
         } else {
-            if let index = profiles.firstIndex(where: { $0.name == finalProfileName }) {
+            if let index = profiles.firstIndex(where: { $0.name.caseInsensitiveCompare(finalProfileName) == .orderedSame }) {
                 for uid in newlyInstalledUniqueIds {
                     if !profiles[index].isModEnabled(uniqueId: uid) {
                         profiles[index].enabledModIds.append(ModReference(uniqueId: uid))
@@ -280,6 +290,24 @@ public final class CollectionService {
         }
         separatorService.saveSeparators(separators, for: finalProfileName)
 
+        // 5. Track Installed Collection
+        if let s = slug, !s.isEmpty {
+            let domain = manifest.info.domainName ?? "stardewvalley"
+            let collectionRecord = InstalledCollection(
+                slug: s,
+                domainName: domain,
+                revisionNumber: revisionNumber ?? 1,
+                name: manifest.info.name,
+                author: manifest.info.author,
+                summary: manifest.info.description,
+                installedDate: Date(),
+                profileName: finalProfileName,
+                installedModIds: newlyInstalledUniqueIds,
+                isDedicatedProfile: createNewProfile
+            )
+            CollectionPersistenceService.shared.addOrUpdateCollection(collectionRecord)
+        }
+
         onProgress("Collection installation complete", 1.0)
 
         return CollectionInstallSummary(
@@ -292,5 +320,73 @@ public final class CollectionService {
             profileName: finalProfileName,
             separatorName: separatorName
         )
+    }
+
+    private func applyCuratorOverrides(
+        from overridesDir: URL,
+        into modsDirectory: URL,
+        installedResults: [ModInstallResult],
+        warnings: inout [String]
+    ) {
+        let fileManager = FileManager.default
+        guard let items = try? fileManager.contentsOfDirectory(at: overridesDir, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) else {
+            return
+        }
+
+        for item in items {
+            var isDir: ObjCBool = false
+            if fileManager.fileExists(atPath: item.path, isDirectory: &isDir), isDir.boolValue {
+                let folderName = item.lastPathComponent
+                var targetURL: URL? = nil
+
+                // Match against installed mods by path, name, or unique ID
+                if let matched = installedResults.first(where: {
+                    $0.installedPath.lastPathComponent.caseInsensitiveCompare(folderName) == .orderedSame ||
+                    $0.modName.caseInsensitiveCompare(folderName) == .orderedSame ||
+                    $0.uniqueID.caseInsensitiveCompare(folderName) == .orderedSame
+                }) {
+                    targetURL = matched.installedPath
+                } else {
+                    let directModURL = modsDirectory.appendingPathComponent(folderName)
+                    if fileManager.fileExists(atPath: directModURL.path) {
+                        targetURL = directModURL
+                    }
+                }
+
+                if let dest = targetURL {
+                    copyDirectoryContents(from: item, to: dest)
+                    warnings.append("Applied curator overrides to '\(dest.lastPathComponent)'.")
+                }
+            } else {
+                let dest = modsDirectory.appendingPathComponent(item.lastPathComponent)
+                try? fileManager.removeItem(at: dest)
+                try? fileManager.copyItem(at: item, to: dest)
+            }
+        }
+    }
+
+    private func copyDirectoryContents(from source: URL, to destination: URL) {
+        let fileManager = FileManager.default
+        guard let enumerator = fileManager.enumerator(at: source, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) else {
+            return
+        }
+
+        let sourcePath = source.standardizedFileURL.path
+        for case let fileURL as URL in enumerator {
+            let relativePath = String(fileURL.standardizedFileURL.path.dropFirst(sourcePath.count))
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            let destFileURL = destination.appendingPathComponent(relativePath)
+
+            var isDir: ObjCBool = false
+            if fileManager.fileExists(atPath: fileURL.path, isDirectory: &isDir) {
+                if isDir.boolValue {
+                    try? fileManager.createDirectory(at: destFileURL, withIntermediateDirectories: true)
+                } else {
+                    try? fileManager.createDirectory(at: destFileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    try? fileManager.removeItem(at: destFileURL)
+                    try? fileManager.copyItem(at: fileURL, to: destFileURL)
+                }
+            }
+        }
     }
 }

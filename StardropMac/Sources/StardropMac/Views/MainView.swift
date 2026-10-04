@@ -328,7 +328,9 @@ private struct MainSheetsModifier: ViewModifier {
                         state: state,
                         manifest: package.manifest,
                         contentURL: package.contentURL,
-                        isTemporary: package.isTemporary
+                        isTemporary: package.isTemporary,
+                        slug: package.slug,
+                        revisionNumber: package.revisionNumber
                     )
                 }
             }
@@ -365,6 +367,20 @@ private struct MainAlertsModifier: ViewModifier {
         )
     }
 
+    private var updateCheckBinding: Binding<Bool> {
+        Binding(
+            get: { state.updateCheckMessage != nil },
+            set: { if !$0 { state.updateCheckMessage = nil } }
+        )
+    }
+
+    private var collectionRemovalBinding: Binding<Bool> {
+        Binding(
+            get: { state.collectionPendingRemoval != nil },
+            set: { if !$0 { state.collectionPendingRemoval = nil } }
+        )
+    }
+
     func body(content: Content) -> some View {
         content
             .onChange(of: state.launcher.launchError) { _, error in
@@ -391,6 +407,13 @@ private struct MainAlertsModifier: ViewModifier {
             } message: {
                 Text(state.modInstallResultAlert ?? "")
             }
+            .alert("Updates", isPresented: updateCheckBinding) {
+                Button("OK", role: .cancel) {
+                    state.updateCheckMessage = nil
+                }
+            } message: {
+                Text(state.updateCheckMessage ?? "")
+            }
             .alert(state.modToDelete?.title ?? "Delete Mod", isPresented: modDeletionBinding) {
                 Button("Cancel", role: .cancel) {
                     state.modToDelete = nil
@@ -400,6 +423,32 @@ private struct MainAlertsModifier: ViewModifier {
                 }
             } message: {
                 Text(state.modToDelete?.message ?? "")
+            }
+            .alert("Remove Collection", isPresented: collectionRemovalBinding) {
+                if let collection = state.collectionPendingRemoval, state.canDeleteAssociatedProfile(for: collection) {
+                    Button("Delete Collection and Profile", role: .destructive) {
+                        state.confirmRemoveCollection(deleteProfile: true)
+                    }
+                    Button("Keep Profile") {
+                        state.confirmRemoveCollection(deleteProfile: false)
+                    }
+                    Button("Cancel", role: .cancel) {
+                        state.collectionPendingRemoval = nil
+                    }
+                } else {
+                    Button("Cancel", role: .cancel) {
+                        state.collectionPendingRemoval = nil
+                    }
+                    Button("Remove", role: .destructive) {
+                        state.confirmRemoveCollection(deleteProfile: false)
+                    }
+                }
+            } message: {
+                if let collection = state.collectionPendingRemoval, state.canDeleteAssociatedProfile(for: collection) {
+                    Text("The collection '\(collection.name)' was created with profile '\(collection.profileName)'. Do you want to delete this profile as well?")
+                } else {
+                    Text("Are you sure you want to remove '\(state.collectionPendingRemoval?.name ?? "this collection")' from your collections?")
+                }
             }
     }
 }

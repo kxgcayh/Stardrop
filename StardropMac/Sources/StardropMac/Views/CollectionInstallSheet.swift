@@ -5,6 +5,8 @@ public struct CollectionInstallSheet: View {
     let manifest: CollectionManifest
     let contentURL: URL
     let isTemporary: Bool
+    let slug: String?
+    let revisionNumber: Int?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -21,12 +23,16 @@ public struct CollectionInstallSheet: View {
         state: AppState,
         manifest: CollectionManifest,
         contentURL: URL,
-        isTemporary: Bool
+        isTemporary: Bool,
+        slug: String? = nil,
+        revisionNumber: Int? = nil
     ) {
         self.state = state
         self.manifest = manifest
         self.contentURL = contentURL
         self.isTemporary = isTemporary
+        self.slug = slug
+        self.revisionNumber = revisionNumber
         _targetProfileName = State(initialValue: "[Collection] \(manifest.info.name)")
     }
 
@@ -126,6 +132,49 @@ public struct CollectionInstallSheet: View {
             return "Install Collection (\(manifest.mods.count) Mods)"
         } else {
             return "Install Collection (\(installedItems.count) Ready, \(needsDownloadItems.count) to Download)"
+        }
+    }
+
+    private var ruleNotices: [CollectionRuleNotice] {
+        manifest.evaluateRules(existingMods: state.mods)
+    }
+
+    private func noticeBadgeText(for level: CollectionRuleNotice.NoticeLevel) -> String {
+        switch level {
+        case .conflict:
+            return "Conflict"
+        case .missingRequirement:
+            return "Missing Dependency"
+        case .recommendation:
+            return "Recommended"
+        case .ordering:
+            return "Ordering"
+        }
+    }
+
+    private func noticeBadgeBackground(for level: CollectionRuleNotice.NoticeLevel) -> Color {
+        switch level {
+        case .conflict:
+            return Color.red.opacity(0.15)
+        case .missingRequirement:
+            return Color.orange.opacity(0.15)
+        case .recommendation:
+            return Color.blue.opacity(0.15)
+        case .ordering:
+            return Color.secondary.opacity(0.15)
+        }
+    }
+
+    private func noticeBadgeForeground(for level: CollectionRuleNotice.NoticeLevel) -> Color {
+        switch level {
+        case .conflict:
+            return Color.red
+        case .missingRequirement:
+            return Color.orange
+        case .recommendation:
+            return Color.blue
+        case .ordering:
+            return Color.secondary
         }
     }
 
@@ -273,6 +322,32 @@ public struct CollectionInstallSheet: View {
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.vertical, 2)
+                    }
+                }
+
+                // Curator Mod Rules & Compatibility Notices
+                if !ruleNotices.isEmpty {
+                    GroupBox(label: Text("Curator Compatibility & Rule Notices").fontWeight(.medium)) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(ruleNotices) { notice in
+                                HStack(alignment: .top, spacing: 8) {
+                                    Text(noticeBadgeText(for: notice.level))
+                                        .font(.caption2.bold())
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(noticeBadgeBackground(for: notice.level))
+                                        .foregroundColor(noticeBadgeForeground(for: notice.level))
+                                        .cornerRadius(4)
+
+                                    Text(notice.message)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 4)
                     }
                 }
 
@@ -565,11 +640,16 @@ public struct CollectionInstallSheet: View {
 
                         Button("Launch Download Assistant (\(pendingNexusMods.count) mods)") {
                             state.selectProfile(named: summary.profileName)
+                            state.refreshMods()
                             state.startFreeUserQueue(
                                 mods: pendingNexusMods,
                                 targetProfileName: summary.profileName,
                                 separatorName: "[Collection] \(manifest.info.name)",
-                                collectionName: manifest.info.name
+                                collectionName: manifest.info.name,
+                                slug: slug,
+                                revisionNumber: revisionNumber,
+                                domainName: manifest.info.domainName ?? "stardewvalley",
+                                isDedicatedProfile: createNewProfile
                             )
                             cleanupAndDismiss()
                         }
@@ -624,6 +704,10 @@ public struct CollectionInstallSheet: View {
         errorMessage = nil
 
         let targetName = createNewProfile ? targetProfileName : state.activeProfile.name
+        let smapiVersion = CollectionMod.installedSMAPIVersion(
+            in: state.mods,
+            fallbackVersion: state.settings.gameDetails?.smapiVersion
+        )
 
         Task {
             do {
@@ -636,7 +720,10 @@ public struct CollectionInstallSheet: View {
                     apiKey: state.nexusApiKey,
                     isPremium: state.isPremiumNexusUser,
                     existingMods: state.mods,
-                    modsDirectory: state.modsDirectory
+                    modsDirectory: state.modsDirectory,
+                    slug: slug,
+                    revisionNumber: revisionNumber,
+                    currentSMAPIVersion: smapiVersion
                 ) { msg, progress in
                     Task { @MainActor in
                         self.progressMessage = msg
@@ -647,6 +734,9 @@ public struct CollectionInstallSheet: View {
                 await MainActor.run {
                     self.isInstalling = false
                     self.installSummary = summary
+                    self.state.selectProfile(named: summary.profileName)
+                    self.state.refreshMods()
+                    self.state.refreshInstalledCollections()
                 }
             } catch {
                 await MainActor.run {

@@ -13,7 +13,10 @@ public final class SeparatorService {
 
     public func fileURL(for profileName: String) -> URL {
         pathing.ensureDirectoriesExist()
-        return pathing.separatorsURL.appendingPathComponent("\(profileName).json")
+        let safe = profileName
+            .replacingOccurrences(of: "/", with: "-")
+            .replacingOccurrences(of: ":", with: " -")
+        return pathing.separatorsURL.appendingPathComponent("\(safe).json")
     }
 
     public func loadSeparators(for profileName: String) -> [ModSeparator] {
