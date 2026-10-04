@@ -41,6 +41,10 @@ public struct AboutSheet: View {
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
 
+                    Text("Forked from Floogen, built by kxgcayh")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
                     HStack(spacing: 6) {
                         Text("Version \(appVersion) (\(buildNumber))")
                             .font(.caption)
@@ -116,26 +120,6 @@ public struct AboutSheet: View {
                                     Text(details.smapiVersion)
                                         .font(.caption)
                                 }
-                            }
-
-                            GridRow {
-                                Text("Game Directory:")
-                                    .foregroundStyle(.secondary)
-                                    .font(.caption)
-                                Text(state.gameDirectory.path)
-                                    .font(.caption)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                            }
-
-                            GridRow {
-                                Text("Mods Directory:")
-                                    .foregroundStyle(.secondary)
-                                    .font(.caption)
-                                Text(state.modsDirectory.path)
-                                    .font(.caption)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
                             }
                         }
                     }

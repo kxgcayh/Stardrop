@@ -44,9 +44,9 @@ cat <<EOF > "$CONTENTS_DIR/Info.plist"
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.11.0</string>
+    <string>1.12.0</string>
     <key>CFBundleVersion</key>
-    <string>2</string>
+    <string>1</string>
     <key>CFBundleIconFile</key>
     <string>Stardrop</string>
     <key>CFBundleURLTypes</key>

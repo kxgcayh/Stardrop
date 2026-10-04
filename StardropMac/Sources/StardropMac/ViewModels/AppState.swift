@@ -105,6 +105,7 @@ public final class AppState: ObservableObject {
     private let profileService = ProfileService.shared
     private let settingsService = SettingsService.shared
     private let separatorService = SeparatorService.shared
+    private let actionLog = ActionLogger.shared
 
     public init() {
         let loadedSettings = settingsService.loadSettings()
@@ -440,6 +441,38 @@ public final class AppState: ObservableObject {
         return true
     }
 
+    // MARK: - Dependency Enforcement
+
+    // Required dependencies that are not installed
+    public func missingDependencies(for mod: Mod) -> [String] {
+        mod.manifest.allDependencies.compactMap { dep in
+            guard dep.isRequired else { return nil }
+            let depId = dep.uniqueID.lowercased()
+            if depId == "pathoschild.smapi" || depId == "smapi" { return nil }
+            if mods.contains(where: { $0.id.caseInsensitiveCompare(dep.uniqueID) == .orderedSame }) {
+                return nil
+            }
+            return dep.uniqueID
+        }
+    }
+
+    // Required dependencies that are installed but currently disabled
+    public func disabledDependencies(for mod: Mod) -> [String] {
+        mod.manifest.allDependencies.compactMap { dep in
+            guard dep.isRequired else { return nil }
+            let depId = dep.uniqueID.lowercased()
+            if depId == "pathoschild.smapi" || depId == "smapi" { return nil }
+            guard let depMod = mods.first(where: { $0.id.caseInsensitiveCompare(dep.uniqueID) == .orderedSame }) else {
+                return nil
+            }
+            return depMod.isEnabled ? nil : dep.uniqueID
+        }
+    }
+
+    public func hasMissingDependencyRequirements(_ mod: Mod) -> Bool {
+        !missingDependencies(for: mod).isEmpty || !disabledDependencies(for: mod).isEmpty
+    }
+
     // MARK: - Actions
 
     public func refreshMods() {
@@ -518,6 +551,7 @@ public final class AppState: ObservableObject {
                 } else {
                     self.updateCheckMessage = "All mods are up to date"
                 }
+                ActionLogger.shared.log("Checked mod updates: \(count) update\(count == 1 ? "" : "s") available")
             }
 
             if self.isNexusConnected {
@@ -541,14 +575,24 @@ public final class AppState: ObservableObject {
             searchText = ""
         }
 
+        // Expand the containing separator synchronously if it is collapsed,
+        // so the mod row exists in the list before the scroll fires.
+        if let idx = separators.firstIndex(where: {
+            $0.modIds.contains { $0.caseInsensitiveCompare(targetMod.id) == .orderedSame }
+        }), !separators[idx].isExpanded {
+            separators[idx].isExpanded = true
+            saveSeparatorsState()
+        }
+
         // Set selected mod ID
         selectedModId = targetMod.id
         selectedModIds = [targetMod.id]
         selectionAnchorId = targetMod.id
 
-        // Trigger scroll notification
+        // Trigger scroll after a short delay so SwiftUI can lay out the
+        // newly expanded separator rows before scrollTo is called.
         scrollTargetModId = nil
-        DispatchQueue.main.async {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             self.scrollTargetModId = targetMod.id
         }
     }
@@ -559,6 +603,7 @@ public final class AppState: ObservableObject {
         if mods[index].isEnabled != isEnabled {
             mods[index].isEnabled = isEnabled
             saveActiveProfileState()
+            actionLog.log("\(isEnabled ? "Enabled" : "Disabled") mod '\(mod.name)' in profile '\(activeProfile.name)'")
         }
     }
 
@@ -567,6 +612,7 @@ public final class AppState: ObservableObject {
         if mod.isCoreSMAPI { return }
         mods[index].isEnabled.toggle()
         saveActiveProfileState()
+        actionLog.log("\(mods[index].isEnabled ? "Enabled" : "Disabled") mod '\(mod.name)' in profile '\(activeProfile.name)'")
     }
 
     public func enableAllMods() {
@@ -574,6 +620,7 @@ public final class AppState: ObservableObject {
             mods[i].isEnabled = true
         }
         saveActiveProfileState()
+        actionLog.log("Enabled all mods in profile '\(activeProfile.name)'")
     }
 
     public func disableAllMods() {
@@ -583,6 +630,7 @@ public final class AppState: ObservableObject {
             }
         }
         saveActiveProfileState()
+        actionLog.log("Disabled all mods in profile '\(activeProfile.name)'")
     }
 
     public func selectProfile(_ profile: Profile) {
@@ -600,6 +648,7 @@ public final class AppState: ObservableObject {
         self.activeProfile = target
         self.settings.lastSelectedProfileName = target.name
         settingsService.saveSettings(self.settings)
+        actionLog.log("Switched to profile '\(target.name)'")
 
         // 3. Keep in-memory profiles array in sync
         if let idx = self.profiles.firstIndex(where: { $0.id == target.id }) {
@@ -650,6 +699,7 @@ public final class AppState: ObservableObject {
         profileService.saveProfile(newProfile)
         self.profiles = profileService.loadProfiles()
         selectProfile(newProfile)
+        actionLog.log("Created profile '\(trimmed)'")
     }
 
     public func deleteProfile(_ profile: Profile) {
@@ -657,6 +707,7 @@ public final class AppState: ObservableObject {
         let isDeletingActive = (activeProfile.id == profile.id)
         profileService.deleteProfile(profile)
         separatorService.deleteSeparators(for: profile.name)
+        actionLog.log("Deleted profile '\(profile.name)'")
         self.profiles = profileService.loadProfiles()
 
         // Clean up any collections dedicated to this deleted profile
@@ -700,6 +751,7 @@ public final class AppState: ObservableObject {
         separatorService.duplicateSeparators(from: source.name, to: copy.name)
         self.profiles = profileService.loadProfiles()
         selectProfile(copy)
+        actionLog.log("Duplicated profile '\(source.name)' as '\(newName)'")
     }
 
     public func renameProfile(_ profile: Profile, newName: String) {
@@ -719,6 +771,7 @@ public final class AppState: ObservableObject {
         if isRenamingActive {
             selectProfile(renamed)
         }
+        actionLog.log("Renamed profile '\(profile.name)' to '\(trimmed)'")
     }
 
     public func launchGame() {
@@ -728,6 +781,7 @@ public final class AppState: ObservableObject {
             gameDirectory: gameDirectory,
             smapiExecutable: pathing.resolveSmapiExecutable(gameDirectory: gameDirectory)
         )
+        actionLog.log("Launched SMAPI with profile '\(activeProfile.name)'")
     }
 
     public func revealInFinder(_ url: URL) {
@@ -848,6 +902,7 @@ public final class AppState: ObservableObject {
         let newSeparator = ModSeparator(name: trimmed, isExpanded: true, modIds: initialModIds)
         separators.append(newSeparator)
         saveSeparatorsState()
+        actionLog.log("Created separator '\(trimmed)'")
     }
 
     public func renameSeparator(_ separator: ModSeparator, newName: String) {
@@ -855,11 +910,13 @@ public final class AppState: ObservableObject {
         guard !trimmed.isEmpty, let idx = separators.firstIndex(where: { $0.id == separator.id }) else { return }
         separators[idx].name = trimmed
         saveSeparatorsState()
+        actionLog.log("Renamed separator '\(separator.name)' to '\(trimmed)'")
     }
 
     public func deleteSeparator(_ separator: ModSeparator) {
         separators.removeAll { $0.id == separator.id }
         saveSeparatorsState()
+        actionLog.log("Deleted separator '\(separator.name)'")
     }
 
     public func moveSeparatorUp(_ separator: ModSeparator) {
@@ -871,6 +928,44 @@ public final class AppState: ObservableObject {
     public func moveSeparatorDown(_ separator: ModSeparator) {
         guard let idx = separators.firstIndex(where: { $0.id == separator.id }), idx < separators.count - 1 else { return }
         separators.swapAt(idx, idx + 1)
+        saveSeparatorsState()
+    }
+
+    /// Moves a separator so it occupies the position previously held by `targetId`.
+    public func moveSeparator(id: UUID, toIndexAt targetId: UUID) {
+        guard let from = separators.firstIndex(where: { $0.id == id }),
+              var targetIdx = separators.firstIndex(where: { $0.id == targetId }),
+              from != targetIdx else { return }
+        let item = separators.remove(at: from)
+        if targetIdx > from { targetIdx -= 1 }
+        separators.insert(item, at: targetIdx)
+        saveSeparatorsState()
+        actionLog.log("Moved separator '\(item.name)' to position \(targetIdx + 1)")
+    }
+
+    /// Moves (or unassigns) a mod. When `target` is nil the mod is removed from all separators.
+    /// `atIndex` refers to a position in the target separator's mod list with the dragged mod already removed.
+    public func moveMod(id: String, toSeparator target: ModSeparator?, atIndex index: Int?) {
+        let storedId: String
+        if let found = separators.flatMap(\.modIds).first(where: { $0.caseInsensitiveCompare(id) == .orderedSame }) {
+            storedId = found
+        } else if let mod = mods.first(where: { $0.id.caseInsensitiveCompare(id) == .orderedSame }) {
+            storedId = mod.id
+        } else {
+            return
+        }
+
+        for i in separators.indices {
+            separators[i].modIds.removeAll { $0.caseInsensitiveCompare(id) == .orderedSame }
+        }
+
+        if let target = target, let tIdx = separators.firstIndex(where: { $0.id == target.id }) {
+            let insertAt = min(max(index ?? separators[tIdx].modIds.count, 0), separators[tIdx].modIds.count)
+            separators[tIdx].modIds.insert(storedId, at: insertAt)
+            actionLog.log("Moved mod '\(storedId)' to separator '\(target.name)'")
+        } else {
+            actionLog.log("Unassigned mod '\(storedId)' from separators")
+        }
         saveSeparatorsState()
     }
 
@@ -952,27 +1047,60 @@ public final class AppState: ObservableObject {
     }
 
     public func autoGenerateSeparatorsFromFolders() {
-        var groups: [String: [String]] = [:]
+        let modsRoot = modsDirectory.standardizedFileURL.path
+        let fileManager = FileManager.default
+
+        // Single pass: separator folder name -> Set of mod ids (deduped, case-insensitively keyed)
+        var groups: [String: (displayName: String, ids: Set<String>)] = [:]
         for mod in mods {
-            let parent = mod.directoryURL.deletingLastPathComponent()
-            if parent.standardizedFileURL.path != modsDirectory.standardizedFileURL.path {
-                var folderName = parent.lastPathComponent
-                if folderName.hasPrefix("[MODS] - ") {
-                    folderName = String(folderName.dropFirst("[MODS] - ".count))
-                }
-                groups[folderName, default: []].append(mod.id)
-            } else if mod.isCoreSMAPI {
-                groups["Core", default: []].append(mod.id)
+            let modPath = mod.directoryURL.standardizedFileURL.path
+            guard modPath.hasPrefix(modsRoot) else { continue }
+
+            let relative = modPath.dropFirst(modsRoot.count)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            let components = relative.split(separator: "/", omittingEmptySubsequences: true)
+
+            // Mod folder sitting directly in the Mods root is not inside a separator folder
+            if components.count <= 1 {
+                guard mod.isCoreSMAPI else { continue }
+                let key = "core"
+                if groups[key] == nil { groups[key] = ("Core", []) }
+                groups[key]?.ids.insert(mod.id)
+                continue
             }
+
+            // The folder directly under Mods defines the separator; nesting below
+            // it is allowed (separator tree), any depth rolls up to this folder.
+            let folderName = String(components[0])
+            let folderURL = URL(fileURLWithPath: modsRoot).appendingPathComponent(folderName)
+            let manifestURL = folderURL.appendingPathComponent("manifest.json")
+
+            // No manifest.json in that folder => it is a separator folder, not a mod
+            guard !fileManager.fileExists(atPath: manifestURL.path) else { continue }
+
+            let key = folderName.lowercased()
+            if groups[key] == nil {
+                groups[key] = (folderName, [])
+            }
+            groups[key]?.ids.insert(mod.id)
         }
         guard !groups.isEmpty else { return }
-        for (name, ids) in groups.sorted(by: { $0.key < $1.key }) {
-            if let idx = separators.firstIndex(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
+
+        // O(1) lookup of existing separators by lowercased name
+        var indexByName: [String: Int] = [:]
+        indexByName.reserveCapacity(separators.count)
+        for (index, separator) in separators.enumerated() {
+            indexByName[separator.name.lowercased()] = index
+        }
+
+        for (key, group) in groups.sorted(by: { $0.value.displayName.localizedCaseInsensitiveCompare($1.value.displayName) == .orderedAscending }) {
+            if let idx = indexByName[key] {
                 var existing = Set(separators[idx].modIds)
-                existing.formUnion(ids)
+                existing.formUnion(group.ids)
                 separators[idx].modIds = Array(existing)
             } else {
-                separators.append(ModSeparator(name: name, isExpanded: true, modIds: ids))
+                indexByName[key] = separators.count
+                separators.append(ModSeparator(name: group.displayName, isExpanded: true, modIds: Array(group.ids)))
             }
         }
         saveSeparatorsState()
@@ -1055,6 +1183,7 @@ public final class AppState: ObservableObject {
                     let details = msg ?? "An unknown error occurred."
                     self.endorsementAlertMessage = "Unable to set the endorsement state:\n\n\(details)"
                 }
+                ActionLogger.shared.log("Set endorsement for mod '\(mod.name)' to \(targetState ? "endorsed" : "abstained")")
             }
         } catch {
             await MainActor.run {
@@ -1133,6 +1262,7 @@ public final class AppState: ObservableObject {
 
                 let installedIds = summary.installedMods.map { $0.uniqueID }
                 self.addInstalledModsToProfile(named: self.activeProfile.name, uniqueIds: installedIds)
+                ActionLogger.shared.log("Installed \(summary.installedMods.count) mod(s) into profile '\(self.activeProfile.name)': \(summary.installedMods.map { $0.modName }.joined(separator: ", "))")
 
                 if let first = summary.installedMods.first {
                     self.selectAndRevealMod(id: first.uniqueID)
@@ -1207,6 +1337,7 @@ public final class AppState: ObservableObject {
         self.activeQueueManager = manager
         self.isFreeUserQueuePresented = true
         manager.startQueue()
+        actionLog.log("Started collection download queue for '\(collectionName)' into profile '\(targetProfileName)'")
     }
 
     @MainActor
@@ -1281,6 +1412,7 @@ public final class AppState: ObservableObject {
 
         selectProfile(named: manager.targetProfileName)
         refreshMods()
+        actionLog.log("Applied completed download queue for collection '\(manager.collectionName)'")
     }
 
     // MARK: - Installed Collections & Updates
@@ -1337,6 +1469,7 @@ public final class AppState: ObservableObject {
                     self.updateCheckMessage = "All installed collections are up to date."
                 }
             }
+            ActionLogger.shared.log("Checked updates for \(collections.count) collection(s): \(updateCount) update(s) available")
         }
     }
 
@@ -1407,6 +1540,7 @@ public final class AppState: ObservableObject {
 
         CollectionPersistenceService.shared.removeCollection(id: collection.id)
         refreshInstalledCollections()
+        actionLog.log("Removed collection '\(collection.name)' (profile '\(collection.profileName)', deleteProfile: \(deleteProfile))")
 
         if deleteProfile {
             if let prof = profiles.first(where: { $0.name.caseInsensitiveCompare(collection.profileName) == .orderedSame }), !prof.isProtected {
@@ -1709,6 +1843,7 @@ public final class AppState: ObservableObject {
 
         // 5. Refresh mod list
         refreshMods()
+        actionLog.log("Deleted \(deleteIds.count) mod(s): \(modsToDelete.map { $0.name }.joined(separator: ", "))")
     }
 
     public func deleteMod(_ mod: Mod) {

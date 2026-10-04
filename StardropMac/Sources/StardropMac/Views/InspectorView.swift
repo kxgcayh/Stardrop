@@ -180,9 +180,17 @@ public struct InspectorView: View {
                                         // Checked and green when required and installed
                                         if dep.isRequired {
                                             if isDepInstalled {
-                                                Image(systemName: "checkmark.circle.fill")
-                                                    .foregroundStyle(Color.green)
-                                                    .font(.caption)
+                                                if let matchedMod, !matchedMod.isEnabled,
+                                                   dep.uniqueID.caseInsensitiveCompare("Pathoschild.SMAPI") != .orderedSame,
+                                                   dep.uniqueID.caseInsensitiveCompare("SMAPI") != .orderedSame {
+                                                    Image(systemName: "pause.circle.fill")
+                                                        .foregroundStyle(Color.orange)
+                                                        .font(.caption)
+                                                } else {
+                                                    Image(systemName: "checkmark.circle.fill")
+                                                        .foregroundStyle(Color.green)
+                                                        .font(.caption)
+                                                }
                                             } else {
                                                 Image(systemName: "exclamationmark.triangle.fill")
                                                     .foregroundStyle(Color.red)
@@ -239,6 +247,15 @@ public struct InspectorView: View {
                                                 .padding(.horizontal, 4)
                                                 .padding(.vertical, 1)
                                                 .background(RoundedRectangle(cornerRadius: 3).fill(Color.red.opacity(0.15)))
+                                        } else if let matchedMod, !matchedMod.isEnabled,
+                                                  dep.uniqueID.caseInsensitiveCompare("Pathoschild.SMAPI") != .orderedSame,
+                                                  dep.uniqueID.caseInsensitiveCompare("SMAPI") != .orderedSame {
+                                            Text("Disabled")
+                                                .font(.caption2.bold())
+                                                .foregroundStyle(Color.orange)
+                                                .padding(.horizontal, 4)
+                                                .padding(.vertical, 1)
+                                                .background(RoundedRectangle(cornerRadius: 3).fill(Color.orange.opacity(0.15)))
                                         } else {
                                             Text("Installed")
                                                 .font(.caption2)
@@ -260,7 +277,7 @@ public struct InspectorView: View {
                                             state.selectAndRevealMod(id: matched.id)
                                         }
                                     }
-                                    .help(matchedMod != nil ? "Installed: \(matchedMod!.name). Click to expand, select, and scroll to this mod." : (isDepInstalled ? "Installed" : "Required dependency is missing!"))
+                                    .help(matchedMod != nil ? (matchedMod!.isEnabled ? "Installed: \(matchedMod!.name). Click to expand, select, and scroll to this mod." : "Installed but disabled: \(matchedMod!.name). Enable it to use this mod.") : (isDepInstalled ? "Installed" : "Required dependency is missing!"))
                                 }
                             }
                             .padding(10)

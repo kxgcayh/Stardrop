@@ -29,7 +29,7 @@ while [[ "$#" -gt 0 ]]; do
             echo "Examples:"
             echo "  ./build-dmg.sh"
             echo "  ./build-dmg.sh --skip-build --open"
-            echo "  ./build-dmg.sh -v 1.11.0"
+            echo "  ./build-dmg.sh -v 1.12.0"
             exit 0
             ;;
         *)
@@ -60,9 +60,9 @@ fi
 # 2. Determine version
 INFO_PLIST="$APP_PATH/Contents/Info.plist"
 if [ -z "$VERSION" ] && [ -f "$INFO_PLIST" ]; then
-    VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO_PLIST" 2>/dev/null || echo "1.11.0")
+    VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$INFO_PLIST" 2>/dev/null || echo "1.12.0")
 fi
-VERSION="${VERSION:-1.11.0}"
+VERSION="${VERSION:-1.12.0}"
 
 VOLUME_NAME="Stardrop"
 OUTPUT_DIR="$DIR/build"

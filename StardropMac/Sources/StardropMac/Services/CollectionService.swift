@@ -309,6 +309,7 @@ public final class CollectionService {
         }
 
         onProgress("Collection installation complete", 1.0)
+        ActionLogger.shared.log("Installed collection '\(manifest.info.name)' (revision \(revisionNumber ?? 1)) into profile '\(finalProfileName)': \(newlyInstalledUniqueIds.count) new mod(s), \(alreadyInstalledCount) already installed")
 
         return CollectionInstallSummary(
             collectionName: manifest.info.name,

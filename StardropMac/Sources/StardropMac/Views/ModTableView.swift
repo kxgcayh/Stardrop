@@ -3,6 +3,7 @@ import SwiftUI
 public struct ModTableView: View {
     @ObservedObject var state: AppState
     @State private var eventMonitor: Any? = nil
+    @State private var dropTargetKey: String? = nil
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -20,7 +21,7 @@ public struct ModTableView: View {
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
-                        LazyVStack(spacing: 4) {
+                        VStack(spacing: 4) {
                             if state.separators.isEmpty {
                                 ForEach(state.filteredMods) { mod in
                                     modRow(mod: mod)
@@ -47,8 +48,14 @@ public struct ModTableView: View {
                     }
                     .onChange(of: state.scrollTargetModId) { _, targetId in
                         guard let id = targetId else { return }
+                        // Safety net: ensure the separator is expanded before scrolling.
+                        // selectAndRevealMod already does this synchronously, but guard
+                        // against any code paths that set scrollTargetModId directly.
                         if let sep = state.separator(forId: id), !sep.isExpanded {
-                            state.toggleSeparatorExpansion(sep)
+                            if let idx = state.separators.firstIndex(where: { $0.id == sep.id }) {
+                                state.separators[idx].isExpanded = true
+                                state.saveSeparatorsState()
+                            }
                         }
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                             withAnimation(.easeInOut(duration: 0.3)) {
@@ -77,6 +84,64 @@ public struct ModTableView: View {
 
     private var unassignedMods: [Mod] {
         state.filteredMods.filter { state.separator(for: $0) == nil }
+    }
+
+    // MARK: - Drag and Drop Helpers
+
+    /// Dropping a mod onto another mod reuses that row's position inside its separator,
+    /// or unassigns the dragged mod when the target row lives outside any separator.
+    private func handleModDrop(items: [String], onto target: Mod) -> Bool {
+        for item in items {
+            guard item.hasPrefix("mod:") else { continue }
+            let draggedId = String(item.dropFirst(4))
+            guard draggedId.caseInsensitiveCompare(target.id) != .orderedSame else { return false }
+            guard let draggedMod = state.mods.first(where: { $0.id.caseInsensitiveCompare(draggedId) == .orderedSame }) else { continue }
+
+            let sourceSep = state.separator(forId: draggedId)
+            if let targetSep = state.separator(forId: target.id) {
+                var targetIndex = targetSep.modIds.firstIndex(where: { $0.caseInsensitiveCompare(target.id) == .orderedSame }) ?? targetSep.modIds.count
+                if let sourceSep, sourceSep.id == targetSep.id,
+                   let sourceIndex = sourceSep.modIds.firstIndex(where: { $0.caseInsensitiveCompare(draggedId) == .orderedSame }),
+                   sourceIndex < targetIndex {
+                    targetIndex -= 1
+                }
+                state.moveMod(id: draggedMod.id, toSeparator: targetSep, atIndex: targetIndex)
+            } else {
+                state.moveMod(id: draggedMod.id, toSeparator: nil, atIndex: nil)
+            }
+            return true
+        }
+        return false
+    }
+
+    /// Dropping onto a separator header: a mod joins that separator, a separator reorders.
+    private func handleSeparatorDrop(items: [String], onto target: ModSeparator) -> Bool {
+        for item in items {
+            if item.hasPrefix("sep:"), let sourceId = UUID(uuidString: String(item.dropFirst(4))) {
+                state.moveSeparator(id: sourceId, toIndexAt: target.id)
+                return true
+            }
+            if item.hasPrefix("mod:") {
+                state.moveMod(id: String(item.dropFirst(4)), toSeparator: target, atIndex: nil)
+                return true
+            }
+        }
+        return false
+    }
+
+    private func handleUnassignedDrop(items: [String]) -> Bool {
+        for item in items where item.hasPrefix("mod:") {
+            state.moveMod(id: String(item.dropFirst(4)), toSeparator: nil, atIndex: nil)
+            return true
+        }
+        return false
+    }
+
+    private func dropHighlight(for key: String) -> (Bool) -> Void {
+        { targeted in
+            if targeted { dropTargetKey = key }
+            else if dropTargetKey == key { dropTargetKey = nil }
+        }
     }
 
     // MARK: - Header Bar
@@ -184,7 +249,7 @@ public struct ModTableView: View {
             if separator.isExpanded {
                 if mods.isEmpty {
                     HStack {
-                        Text("No mods in this separator — right-click a mod to move it here")
+                        Text("No mods in this separator — drag a mod here")
                             .font(.caption)
                             .foregroundStyle(.tertiary)
                             .italic()
@@ -192,6 +257,19 @@ public struct ModTableView: View {
                             .padding(.horizontal, 24)
                         Spacer()
                     }
+                    .contentShape(Rectangle())
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.blue, lineWidth: 2)
+                            .opacity(dropTargetKey == "mod:empty-\(separator.id.uuidString)" ? 1 : 0)
+                    )
+                    .dropDestination(for: String.self, action: { items, _ in
+                        guard items.contains(where: { $0.hasPrefix("mod:") }) else { return false }
+                        for item in items where item.hasPrefix("mod:") {
+                            state.moveMod(id: String(item.dropFirst(4)), toSeparator: separator, atIndex: nil)
+                        }
+                        return true
+                    }, isTargeted: dropHighlight(for: "mod:empty-\(separator.id.uuidString)"))
                 } else {
                     ForEach(mods) { mod in
                         modRow(mod: mod)
@@ -211,7 +289,7 @@ public struct ModTableView: View {
         let isFirst = state.separators.first?.id == separator.id
         let isLast = state.separators.last?.id == separator.id
 
-        return HStack(spacing: 8) {
+        let content = HStack(spacing: 8) {
             // Expand/Collapse Chevron
             Image(systemName: separator.isExpanded ? "chevron.down" : "chevron.right")
                 .font(.system(size: 11, weight: .bold))
@@ -334,6 +412,26 @@ public struct ModTableView: View {
                 state.deleteSeparator(separator)
             }
         }
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.blue, lineWidth: 2)
+                .opacity(dropTargetKey == "sep:\(separator.id.uuidString)" ? 1 : 0)
+        )
+        .dropDestination(for: String.self, action: { items, _ in
+            handleSeparatorDrop(items: items, onto: separator)
+        }, isTargeted: dropHighlight(for: "sep:\(separator.id.uuidString)"))
+
+        return draggableSeparatorContent(content, separator: separator)
+    }
+
+    // Only collapsed separators can be dragged (to reorder); expanded ones stay put.
+    @ViewBuilder
+    private func draggableSeparatorContent<V: View>(_ content: V, separator: ModSeparator) -> some View {
+        if separator.isExpanded {
+            content
+        } else {
+            content.draggable("sep:\(separator.id.uuidString)")
+        }
     }
 
     // MARK: - Unassigned Section
@@ -363,6 +461,15 @@ public struct ModTableView: View {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color(NSColor.controlBackgroundColor).opacity(0.4))
             )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.blue, lineWidth: 2)
+                    .opacity(dropTargetKey == "unassigned" ? 1 : 0)
+            )
+            .contentShape(Rectangle())
+            .dropDestination(for: String.self, action: { items, _ in
+                handleUnassignedDrop(items: items)
+            }, isTargeted: dropHighlight(for: "unassigned"))
 
             ForEach(mods) { mod in
                 modRow(mod: mod)
@@ -447,6 +554,29 @@ public struct ModTableView: View {
                                 .fill(Color.blue.opacity(0.12))
                         )
                         .help("Core SMAPI Component (Always Active)")
+                } else if state.hasMissingDependencyRequirements(mod) {
+                    let missing = state.missingDependencies(for: mod)
+                    let disabled = state.disabledDependencies(for: mod)
+                    let details = (missing.map { "\($0) (missing)" } + disabled.map { "\($0) (disabled)" }).joined(separator: ", ")
+                    Button {
+                        if state.selectedModIds.contains(mod.id) && state.selectedModIds.count > 1 {
+                            state.toggleSelectedMods()
+                        } else {
+                            state.handleModClick(mod, isShift: false, isCommand: false)
+                            state.toggleMod(mod)
+                        }
+                        DispatchQueue.main.async {
+                            NSApp.keyWindow?.makeFirstResponder(nil)
+                        }
+                    } label: {
+                        Text("?")
+                            .font(.caption.bold())
+                            .foregroundStyle(Color.orange)
+                            .frame(width: 14, height: 14)
+                            .background(Circle().fill(Color.orange.opacity(0.15)))
+                    }
+                    .buttonStyle(.plain)
+                    .help("Missing dependencies requirement: \(details)")
                 } else {
                     Button {
                         if state.selectedModIds.contains(mod.id) && state.selectedModIds.count > 1 {
@@ -701,6 +831,15 @@ public struct ModTableView: View {
                 .disabled(mod.isCoreSMAPI)
             }
         }
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Color.blue, lineWidth: 2)
+                .opacity(dropTargetKey == "mod:\(mod.id)" ? 1 : 0)
+        )
+        .draggable("mod:\(mod.id)")
+        .dropDestination(for: String.self, action: { items, _ in
+            handleModDrop(items: items, onto: mod)
+        }, isTargeted: dropHighlight(for: "mod:\(mod.id)"))
     }
 
     // MARK: - Empty State
