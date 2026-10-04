@@ -48,4 +48,4 @@ Stardrop has been generously translated into several languages by the following 
 
 ![](https://imgur.com/kalsOjS.gif)
 
-![](https://imgur.com/a/8jmEPV1)
+![](https://imgur.com/a/8jmEPV1.gif)
