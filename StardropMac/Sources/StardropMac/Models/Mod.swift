@@ -7,6 +7,8 @@ public struct Mod: Identifiable, Hashable {
     public var isEnabled: Bool
     public var suggestedVersion: String?
     public var updateURL: URL?
+    public var isEndorsed: Bool = false
+    public var isEndorsing: Bool = false
 
     public var name: String { manifest.name }
     public var author: String { manifest.author }
@@ -58,11 +60,15 @@ public struct Mod: Identifiable, Hashable {
         manifest: ModManifest,
         directoryURL: URL,
         isEnabled: Bool = true,
-        suggestedVersion: String? = nil
+        suggestedVersion: String? = nil,
+        isEndorsed: Bool = false,
+        isEndorsing: Bool = false
     ) {
         self.manifest = manifest
         self.directoryURL = directoryURL
         self.isEnabled = isEnabled
         self.suggestedVersion = suggestedVersion
+        self.isEndorsed = isEndorsed
+        self.isEndorsing = isEndorsing
     }
 }

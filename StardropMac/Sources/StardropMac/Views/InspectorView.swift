@@ -51,6 +51,31 @@ public struct InspectorView: View {
                         infoRow(label: "Version", value: mod.version)
                         infoRow(label: "Unique ID", value: mod.id)
 
+                        if let nexusId = mod.nexusModId {
+                            HStack {
+                                Text("Nexus ID")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 80, alignment: .leading)
+                                Text("\(nexusId)")
+                                    .font(.caption.monospaced())
+
+                                Spacer()
+
+                                if mod.isEndorsed {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "hand.thumbsup.fill")
+                                        Text("Endorsed")
+                                    }
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(.orange)
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Capsule().fill(Color.orange.opacity(0.15)))
+                                }
+                            }
+                        }
+
                         if mod.hasUpdate {
                             HStack {
                                 Text("New Version")
@@ -257,6 +282,30 @@ public struct InspectorView: View {
                                     .frame(maxWidth: .infinity)
                             }
                             .controlSize(.regular)
+                        }
+
+                        if mod.nexusModId != nil {
+                            Button {
+                                Task {
+                                    await state.toggleEndorsement(for: mod)
+                                }
+                            } label: {
+                                HStack {
+                                    if mod.isEndorsing {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                            .padding(.trailing, 4)
+                                    } else {
+                                        Image(systemName: mod.isEndorsed ? "hand.thumbsup.fill" : "hand.thumbsup")
+                                            .foregroundStyle(mod.isEndorsed ? Color.orange : Color.primary)
+                                    }
+                                    Text(mod.isEndorsed ? "Endorsed on Nexus" : "Endorse on Nexus")
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .controlSize(.regular)
+                            .disabled(mod.isEndorsing)
+                            .help(mod.isEndorsed ? "Click to remove endorsement (abstain)" : (state.isNexusConnected ? "Click to endorse on Nexus Mods" : "Connect Nexus Mods in Settings to endorse"))
                         }
                     }
                 }

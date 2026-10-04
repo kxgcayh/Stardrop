@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import SwiftUI
+import UniformTypeIdentifiers
 
 public enum SidebarCategory: Hashable {
     case allMods
@@ -27,6 +28,10 @@ public final class AppState: ObservableObject {
     @Published public var isCheckingUpdates: Bool = false
     @Published public var lastUpdateCheckDate: Date? = nil
     @Published public var updateCheckMessage: String? = nil
+    @Published public var endorsementAlertMessage: String? = nil
+    @Published public var isInstallingMods: Bool = false
+    @Published public var modInstallProgressMessage: String? = nil
+    @Published public var modInstallResultAlert: String? = nil
 
     public var availableUpdatesCount: Int {
         mods.filter { $0.hasUpdate }.count
@@ -42,8 +47,12 @@ public final class AppState: ObservableObject {
         return separators.allSatisfy { $0.isExpanded }
     }
 
+    public var nexusApiKey: String? {
+        SimpleObscureService.shared.getDecryptedKey(rawKey: settings.nexusDetails.key)
+    }
+
     public var isNexusConnected: Bool {
-        guard let key = settings.nexusDetails.key, !key.isEmpty else { return false }
+        guard let key = nexusApiKey, !key.isEmpty else { return false }
         return settings.nexusDetails.username != nil
     }
 
@@ -73,6 +82,12 @@ public final class AppState: ObservableObject {
         refreshMods()
         if self.selectedModId == nil {
             self.selectedModId = self.mods.first?.id
+        }
+
+        if self.isNexusConnected {
+            Task { [weak self] in
+                await self?.fetchEndorsements()
+            }
         }
     }
 
@@ -202,11 +217,15 @@ public final class AppState: ObservableObject {
             guard mod.suggestedVersion != nil else { return nil }
             return (mod.id.lowercased(), (mod.suggestedVersion, mod.updateURL))
         }, uniquingKeysWith: { first, _ in first })
+        let previousEndorsements = Dictionary(mods.map { ($0.id.lowercased(), $0.isEndorsed) }, uniquingKeysWith: { first, _ in first })
         var scanned = scanner.scanMods(in: modsDirectory, enabledIds: enabledSet)
         for i in 0..<scanned.count {
             if let prev = previousUpdates[scanned[i].id.lowercased()] {
                 scanned[i].suggestedVersion = prev.0
                 scanned[i].updateURL = prev.1
+            }
+            if let prevEndorsed = previousEndorsements[scanned[i].id.lowercased()] {
+                scanned[i].isEndorsed = prevEndorsed
             }
         }
         self.mods = scanned
@@ -216,6 +235,12 @@ public final class AppState: ObservableObject {
             selectedModId = scanned.first?.id
         }
         saveActiveProfileState()
+
+        if isNexusConnected {
+            Task { [weak self] in
+                await self?.fetchEndorsements()
+            }
+        }
     }
 
     public func checkForModUpdates() async {
@@ -255,6 +280,10 @@ public final class AppState: ObservableObject {
                 } else {
                     self.updateCheckMessage = "All mods are up to date"
                 }
+            }
+
+            if self.isNexusConnected {
+                await self.fetchEndorsements()
             }
         } catch {
             print("Failed to fetch mod updates: \(error)")
@@ -635,5 +664,176 @@ public final class AppState: ObservableObject {
             }
         }
         saveSeparatorsState()
+    }
+
+    // MARK: - Nexus Endorsements
+
+    public func fetchEndorsements() async {
+        guard isNexusConnected, let apiKey = nexusApiKey, !apiKey.isEmpty else {
+            return
+        }
+
+        do {
+            let endorsements = try await NexusService.shared.getEndorsements(apiKey: apiKey)
+            await MainActor.run {
+                let endorsementMap = Dictionary(endorsements.map { ($0.modId, $0.isEndorsed) }, uniquingKeysWith: { first, _ in first })
+                for i in 0..<self.mods.count {
+                    if let modId = self.mods[i].nexusModId {
+                        if let isEndorsed = endorsementMap[modId] {
+                            self.mods[i].isEndorsed = isEndorsed
+                        }
+                    }
+                }
+            }
+        } catch {
+            print("Failed to fetch endorsements from Nexus Mods: \(error)")
+        }
+    }
+
+    public func toggleEndorsement(for mod: Mod) async {
+        guard let modId = mod.nexusModId else { return }
+
+        guard isNexusConnected, let apiKey = nexusApiKey, !apiKey.isEmpty else {
+            await MainActor.run {
+                self.endorsementAlertMessage = "Please connect your Nexus Mods account in Settings before endorsing mods."
+            }
+            return
+        }
+
+        await MainActor.run {
+            if let idx = self.mods.firstIndex(where: { $0.id == mod.id }) {
+                self.mods[idx].isEndorsing = true
+            }
+        }
+
+        let targetState = !mod.isEndorsed
+
+        do {
+            let response = try await NexusService.shared.setModEndorsement(modId: modId, endorse: targetState, apiKey: apiKey)
+
+            await MainActor.run {
+                if let idx = self.mods.firstIndex(where: { $0.id == mod.id }) {
+                    self.mods[idx].isEndorsing = false
+                }
+
+                switch response {
+                case .endorsed:
+                    if let idx = self.mods.firstIndex(where: { $0.id == mod.id }) {
+                        self.mods[idx].isEndorsed = true
+                    }
+                case .abstained:
+                    if let idx = self.mods.firstIndex(where: { $0.id == mod.id }) {
+                        self.mods[idx].isEndorsed = false
+                    }
+                case .isOwnMod:
+                    self.endorsementAlertMessage = "Unable to set the endorsement state:\n\nYou are the owner of this mod."
+                case .tooSoonAfterDownload:
+                    self.endorsementAlertMessage = "Unable to set the endorsement state:\n\nYou must wait 15 minutes after downloading this mod.\n\nAttempting to endorse will reset this timer."
+                case .notDownloadedMod:
+                    self.endorsementAlertMessage = "Unable to set the endorsement state:\n\nYou must download this mod from Nexus Mods in order to endorse it."
+                case .unknown(let msg):
+                    let details = msg ?? "An unknown error occurred."
+                    self.endorsementAlertMessage = "Unable to set the endorsement state:\n\n\(details)"
+                }
+            }
+        } catch {
+            await MainActor.run {
+                if let idx = self.mods.firstIndex(where: { $0.id == mod.id }) {
+                    self.mods[idx].isEndorsing = false
+                }
+                self.endorsementAlertMessage = "Unable to set the endorsement state:\n\n\(error.localizedDescription)"
+            }
+        }
+    }
+
+    // MARK: - Mod Archive Installation
+
+    public func promptInstallModArchive() {
+        let panel = NSOpenPanel()
+        panel.title = "Install Mod Archive"
+        panel.prompt = "Install"
+        panel.message = "Choose mod archive files (.zip, .7z, .rar, .tar.gz) or mod folders"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+
+        var contentTypes: [UTType] = [.zip, .gzip, .bz2]
+        if let t7z = UTType(filenameExtension: "7z") { contentTypes.append(t7z) }
+        if let rar = UTType(filenameExtension: "rar") { contentTypes.append(rar) }
+        if let tar = UTType(filenameExtension: "tar") { contentTypes.append(tar) }
+        contentTypes.append(.folder)
+        panel.allowedContentTypes = contentTypes
+
+        if panel.runModal() == .OK {
+            let urls = panel.urls
+            guard !urls.isEmpty else { return }
+            Task {
+                await installMods(from: urls)
+            }
+        }
+    }
+
+    public func installMods(from urls: [URL]) async {
+        guard !urls.isEmpty else { return }
+
+        await MainActor.run {
+            self.isInstallingMods = true
+            self.modInstallProgressMessage = "Installing \(urls.count) item\(urls.count == 1 ? "" : "s")..."
+        }
+
+        do {
+            let summary = try await ModInstallerService.shared.installMods(
+                from: urls,
+                into: self.modsDirectory,
+                existingMods: self.mods
+            )
+
+            await MainActor.run {
+                self.isInstallingMods = false
+                self.modInstallProgressMessage = nil
+
+                self.refreshMods()
+
+                if let first = summary.installedMods.first {
+                    self.selectAndRevealMod(id: first.uniqueID)
+                }
+
+                var messageLines: [String] = []
+                if !summary.installedMods.isEmpty {
+                    let count = summary.installedMods.count
+                    messageLines.append("Successfully installed \(count) mod\(count == 1 ? "" : "s"):")
+                    for installed in summary.installedMods {
+                        let action = installed.isUpdate ? "Updated" : "Installed"
+                        messageLines.append("• \(installed.modName) v\(installed.version) (\(action))")
+                    }
+                }
+
+                if !summary.warnings.isEmpty {
+                    if !messageLines.isEmpty { messageLines.append("") }
+                    messageLines.append("Warnings:")
+                    for w in summary.warnings {
+                        messageLines.append("• \(w)")
+                    }
+                }
+
+                if !summary.errors.isEmpty {
+                    if !messageLines.isEmpty { messageLines.append("") }
+                    messageLines.append("Errors:")
+                    for e in summary.errors {
+                        messageLines.append("• \(e)")
+                    }
+                }
+
+                if !messageLines.isEmpty {
+                    self.modInstallResultAlert = messageLines.joined(separator: "\n")
+                }
+            }
+        } catch {
+            await MainActor.run {
+                self.isInstallingMods = false
+                self.modInstallProgressMessage = nil
+                self.modInstallResultAlert = "Failed to install mods: \(error.localizedDescription)"
+            }
+        }
     }
 }

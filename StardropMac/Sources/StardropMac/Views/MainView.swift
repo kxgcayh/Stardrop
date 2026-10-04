@@ -1,9 +1,11 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 public struct MainView: View {
     @StateObject private var state = AppState()
     @State private var isInspectorPresented = true
     @State private var showingErrorAlert = false
+    @State private var isDropTargeted = false
 
     public var body: some View {
         NavigationSplitView {
@@ -108,6 +110,13 @@ public struct MainView: View {
                 .help("Bulk Mod & Separator Actions")
 
                 Button {
+                    state.promptInstallModArchive()
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .help("Install Mod Archive (.zip, .7z, .rar) (⌘O)")
+
+                Button {
                     state.refreshMods()
                 } label: {
                     Image(systemName: "arrow.clockwise")
@@ -162,70 +171,240 @@ public struct MainView: View {
                 .help(state.launcher.isRunning ? "Game is running" : "Launch Stardew Valley with SMAPI")
             }
         }
-        .sheet(isPresented: $state.isNewProfilePresented) {
-            NewProfileSheet(state: state)
-        }
-        .sheet(isPresented: $state.isSettingsPresented) {
-            SettingsSheet(state: state)
-        }
-        .sheet(isPresented: $state.isNexusPresented) {
-            NexusAccountSheet(state: state)
-        }
-        .sheet(isPresented: $state.isAboutPresented) {
-            AboutSheet(state: state)
-        }
-        .sheet(isPresented: $state.isConfigEditorPresented) {
-            if let mod = state.editingMod {
-                ConfigEditorSheet(mod: mod)
+        .modifier(MainSheetsModifier(state: state))
+        .modifier(MainAlertsModifier(
+            state: state,
+            showingErrorAlert: $showingErrorAlert
+        ))
+        .overlay {
+            if isDropTargeted {
+                dropTargetOverlay
+            }
+            if state.isInstallingMods {
+                installingProgressOverlay
             }
         }
-        .sheet(isPresented: $state.isNewSeparatorPresented) {
-            NewSeparatorSheet(state: state)
+        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+            handleDrop(providers: providers)
         }
-        .sheet(item: $state.separatorToRename) { separator in
-            RenameSeparatorSheet(state: state, separator: separator)
-        }
-        .onChange(of: state.launcher.launchError) { _, error in
-            showingErrorAlert = error != nil
-        }
-        .alert("SMAPI Launch Error", isPresented: $showingErrorAlert) {
-            Button("OK", role: .cancel) {
-                state.launcher.launchError = nil
+        .modifier(MainNotificationsModifier(state: state))
+    }
+
+    // MARK: - Drag and Drop & Installation Overlays
+
+    private var dropTargetOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+
+            VStack(spacing: 14) {
+                Image(systemName: "arrow.down.doc.fill")
+                    .font(.system(size: 48))
+                    .foregroundStyle(.blue)
+
+                Text("Drop Mod Archive to Install")
+                    .font(.title2.bold())
+                    .foregroundStyle(.primary)
+
+                Text("Supports .zip, .7z, .rar, .tar.gz and mod folders")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
-        } message: {
-            Text(state.launcher.launchError ?? "Unknown error occurred while starting SMAPI.")
+            .padding(32)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(NSColor.windowBackgroundColor))
+                    .shadow(radius: 20)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(Color.blue, style: StrokeStyle(lineWidth: 3, dash: [8, 4]))
+            )
         }
-        .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
-            state.isSettingsPresented = true
+        .allowsHitTesting(false)
+        .transition(.opacity)
+    }
+
+    private var installingProgressOverlay: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+
+            VStack(spacing: 14) {
+                ProgressView()
+                    .controlSize(.regular)
+
+                Text(state.modInstallProgressMessage ?? "Installing mod...")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+
+                Text("Extracting files and validating manifests...")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(24)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(NSColor.windowBackgroundColor))
+                    .shadow(radius: 12)
+            )
         }
-        .onReceive(NotificationCenter.default.publisher(for: .openNexus)) { _ in
-            state.isNexusPresented = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .openAbout)) { _ in
-            state.isAboutPresented = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .checkForUpdates)) { _ in
-            Task {
-                await state.checkForModUpdates()
+        .allowsHitTesting(true)
+        .transition(.opacity)
+    }
+
+    private func handleDrop(providers: [NSItemProvider]) -> Bool {
+        let dispatchGroup = DispatchGroup()
+        var urls: [URL] = []
+
+        for provider in providers {
+            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                dispatchGroup.enter()
+                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                    defer { dispatchGroup.leave() }
+                    if let url = item as? URL {
+                        urls.append(url)
+                    } else if let nsurl = item as? NSURL {
+                        urls.append(nsurl as URL)
+                    } else if let data = item as? Data, let url = URL(dataRepresentation: data, relativeTo: nil) {
+                        urls.append(url)
+                    } else if let str = item as? String, let url = URL(string: str) {
+                        urls.append(url)
+                    }
+                }
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .refreshMods)) { _ in
-            state.refreshMods()
+
+        dispatchGroup.notify(queue: .main) {
+            let fileURLs = urls.filter { $0.isFileURL || FileManager.default.fileExists(atPath: $0.path) }
+            if !fileURLs.isEmpty {
+                Task {
+                    await state.installMods(from: fileURLs)
+                }
+            }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .enableAllMods)) { _ in
-            state.enableAllMods()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .disableAllMods)) { _ in
-            state.disableAllMods()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .toggleSelectedMod)) { _ in
-            state.toggleSelectedMod()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .newSeparator)) { _ in
-            state.promptNewSeparator()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .launchSmapi)) { _ in
-            state.launchGame()
-        }
+        return true
     }
 }
+
+// MARK: - View Modifiers to keep type checking fast
+
+private struct MainSheetsModifier: ViewModifier {
+    @ObservedObject var state: AppState
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(isPresented: $state.isNewProfilePresented) {
+                NewProfileSheet(state: state)
+            }
+            .sheet(isPresented: $state.isSettingsPresented) {
+                SettingsSheet(state: state)
+            }
+            .sheet(isPresented: $state.isNexusPresented) {
+                NexusAccountSheet(state: state)
+            }
+            .sheet(isPresented: $state.isAboutPresented) {
+                AboutSheet(state: state)
+            }
+            .sheet(isPresented: $state.isConfigEditorPresented) {
+                if let mod = state.editingMod {
+                    ConfigEditorSheet(mod: mod)
+                }
+            }
+            .sheet(isPresented: $state.isNewSeparatorPresented) {
+                NewSeparatorSheet(state: state)
+            }
+            .sheet(item: $state.separatorToRename) { separator in
+                RenameSeparatorSheet(state: state, separator: separator)
+            }
+    }
+}
+
+private struct MainAlertsModifier: ViewModifier {
+    @ObservedObject var state: AppState
+    @Binding var showingErrorAlert: Bool
+
+    private var endorsementBinding: Binding<Bool> {
+        Binding(
+            get: { state.endorsementAlertMessage != nil },
+            set: { if !$0 { state.endorsementAlertMessage = nil } }
+        )
+    }
+
+    private var modInstallBinding: Binding<Bool> {
+        Binding(
+            get: { state.modInstallResultAlert != nil },
+            set: { if !$0 { state.modInstallResultAlert = nil } }
+        )
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: state.launcher.launchError) { _, error in
+                showingErrorAlert = error != nil
+            }
+            .alert("SMAPI Launch Error", isPresented: $showingErrorAlert) {
+                Button("OK", role: .cancel) {
+                    state.launcher.launchError = nil
+                }
+            } message: {
+                Text(state.launcher.launchError ?? "Unknown error occurred while starting SMAPI.")
+            }
+            .alert("Endorsement", isPresented: endorsementBinding) {
+                Button("OK", role: .cancel) {
+                    state.endorsementAlertMessage = nil
+                }
+            } message: {
+                Text(state.endorsementAlertMessage ?? "")
+            }
+            .alert("Mod Installation", isPresented: modInstallBinding) {
+                Button("OK", role: .cancel) {
+                    state.modInstallResultAlert = nil
+                }
+            } message: {
+                Text(state.modInstallResultAlert ?? "")
+            }
+    }
+}
+
+private struct MainNotificationsModifier: ViewModifier {
+    @ObservedObject var state: AppState
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
+                state.isSettingsPresented = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openNexus)) { _ in
+                state.isNexusPresented = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .openAbout)) { _ in
+                state.isAboutPresented = true
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .checkForUpdates)) { _ in
+                Task {
+                    await state.checkForModUpdates()
+                }
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .refreshMods)) { _ in
+                state.refreshMods()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .enableAllMods)) { _ in
+                state.enableAllMods()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .disableAllMods)) { _ in
+                state.disableAllMods()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .toggleSelectedMod)) { _ in
+                state.toggleSelectedMod()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .newSeparator)) { _ in
+                state.promptNewSeparator()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .installModArchive)) { _ in
+                state.promptInstallModArchive()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .launchSmapi)) { _ in
+                state.launchGame()
+            }
+    }
+}
+

@@ -102,7 +102,7 @@ public struct ModTableView: View {
                 .frame(width: 75, alignment: .center)
 
             Text("Actions")
-                .frame(width: 70, alignment: .center)
+                .frame(width: 95, alignment: .center)
         }
         .font(.caption.bold())
         .foregroundStyle(.secondary)
@@ -479,6 +479,27 @@ public struct ModTableView: View {
                     .help("Update available to v\(mod.suggestedVersion ?? "") — Click to download")
                 }
 
+                if mod.nexusModId != nil {
+                    Button {
+                        Task {
+                            await state.toggleEndorsement(for: mod)
+                        }
+                    } label: {
+                        if mod.isEndorsing {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .frame(width: 13, height: 13)
+                        } else {
+                            Image(systemName: mod.isEndorsed ? "hand.thumbsup.fill" : "hand.thumbsup")
+                                .font(.system(size: 12))
+                                .foregroundStyle(mod.isEndorsed ? Color.orange : Color.secondary)
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(mod.isEndorsing)
+                    .help(mod.isEndorsed ? "Endorsed on Nexus Mods — Click to abstain" : (state.isNexusConnected ? "Endorse on Nexus Mods" : "Connect Nexus Mods to endorse"))
+                }
+
                 if mod.hasConfig {
                     Button {
                         state.editingMod = mod
@@ -500,7 +521,7 @@ public struct ModTableView: View {
                 .buttonStyle(.borderless)
                 .help("Reveal in Finder")
             }
-            .frame(width: 70, alignment: .center)
+            .frame(width: 95, alignment: .center)
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
@@ -608,8 +629,25 @@ public struct ModTableView: View {
                     NSWorkspace.shared.open(nexusURL)
                 }
             }
+            if mod.nexusModId != nil {
+                Button {
+                    Task {
+                        await state.toggleEndorsement(for: mod)
+                    }
+                } label: {
+                    Label(
+                        mod.isEndorsed ? "Unendorse on Nexus Mods" : "Endorse on Nexus Mods",
+                        systemImage: mod.isEndorsed ? "hand.thumbsup.slash" : "hand.thumbsup"
+                    )
+                }
+                .disabled(mod.isEndorsing)
+            }
 
             Divider()
+
+            Button("Install Mod Archive... (⌘O)") {
+                state.promptInstallModArchive()
+            }
 
             Button("Copy Unique ID") {
                 NSPasteboard.general.clearContents()
@@ -633,6 +671,15 @@ public struct ModTableView: View {
                     .font(.caption)
                     .foregroundStyle(.tertiary)
             }
+
+            Button {
+                state.promptInstallModArchive()
+            } label: {
+                Label("Install Mod Archive...", systemImage: "plus.circle")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
+            .padding(.top, 4)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

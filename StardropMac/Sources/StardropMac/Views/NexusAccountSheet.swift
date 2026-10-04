@@ -9,8 +9,7 @@ public struct NexusAccountSheet: View {
     @State private var errorMessage: String?
 
     public var isConnected: Bool {
-        guard let key = state.settings.nexusDetails.key, !key.isEmpty else { return false }
-        return state.settings.nexusDetails.username != nil
+        state.isNexusConnected
     }
 
     public var body: some View {
@@ -43,7 +42,7 @@ public struct NexusAccountSheet: View {
         }
         .frame(width: 440)
         .onAppear {
-            apiKeyInput = state.settings.nexusDetails.key ?? ""
+            apiKeyInput = state.nexusApiKey ?? ""
         }
     }
 
@@ -183,13 +182,15 @@ public struct NexusAccountSheet: View {
         Task {
             do {
                 let response = try await NexusService.shared.validateKey(key)
+                let encryptedKey = SimpleObscureService.shared.encryptAndSaveKey(key) ?? key
                 await MainActor.run {
                     isValidating = false
-                    state.settings.nexusDetails.key = key
+                    state.settings.nexusDetails.key = encryptedKey
                     state.settings.nexusDetails.username = response.name
                     state.settings.nexusDetails.isPremium = response.isPremium ?? false
                     SettingsService.shared.saveSettings(state.settings)
                 }
+                await state.fetchEndorsements()
             } catch {
                 await MainActor.run {
                     isValidating = false
@@ -200,9 +201,13 @@ public struct NexusAccountSheet: View {
     }
 
     private func disconnect() {
+        SimpleObscureService.shared.clearNotionCache()
         state.settings.nexusDetails.key = nil
         state.settings.nexusDetails.username = nil
         state.settings.nexusDetails.isPremium = false
         SettingsService.shared.saveSettings(state.settings)
+        for i in 0..<state.mods.count {
+            state.mods[i].isEndorsed = false
+        }
     }
 }

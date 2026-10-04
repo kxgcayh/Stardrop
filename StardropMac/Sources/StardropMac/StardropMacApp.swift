@@ -13,6 +13,13 @@ struct StardropMacApp: App {
         .commands {
             SidebarCommands()
 
+            CommandGroup(replacing: .newItem) {
+                Button("Install Mod Archive...") {
+                    NotificationCenter.default.post(name: .installModArchive, object: nil)
+                }
+                .keyboardShortcut("o", modifiers: .command)
+            }
+
             CommandGroup(replacing: .appInfo) {
                 Button("About Stardrop") {
                     NotificationCenter.default.post(name: .openAbout, object: nil)
@@ -114,4 +121,5 @@ extension Notification.Name {
     static let disableAllMods = Notification.Name("StardropDisableAllMods")
     static let toggleSelectedMod = Notification.Name("StardropToggleSelectedMod")
     static let newSeparator = Notification.Name("StardropNewSeparator")
+    static let installModArchive = Notification.Name("StardropInstallModArchive")
 }
