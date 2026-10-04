@@ -61,8 +61,8 @@ public final class NexusService {
         request.httpMethod = "GET"
         request.setValue(trimmedKey, forHTTPHeaderField: "apikey")
         request.setValue("Stardrop", forHTTPHeaderField: "Application-Name")
-        request.setValue("1.10.4", forHTTPHeaderField: "Application-Version")
-        request.setValue("Stardrop/1.10.4 macOS", forHTTPHeaderField: "User-Agent")
+        request.setValue(AppVersion.current, forHTTPHeaderField: "Application-Version")
+        request.setValue("Stardrop/\(AppVersion.current) macOS", forHTTPHeaderField: "User-Agent")
 
         let (data, response) = try await URLSession.shared.data(for: request)
 
@@ -97,8 +97,8 @@ public final class NexusService {
         request.httpMethod = "GET"
         request.setValue(trimmedKey, forHTTPHeaderField: "apikey")
         request.setValue("Stardrop", forHTTPHeaderField: "Application-Name")
-        request.setValue("1.10.4", forHTTPHeaderField: "Application-Version")
-        request.setValue("Stardrop/1.10.4 macOS", forHTTPHeaderField: "User-Agent")
+        request.setValue(AppVersion.current, forHTTPHeaderField: "Application-Version")
+        request.setValue("Stardrop/\(AppVersion.current) macOS", forHTTPHeaderField: "User-Agent")
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
@@ -122,8 +122,8 @@ public final class NexusService {
         request.httpMethod = "POST"
         request.setValue(trimmedKey, forHTTPHeaderField: "apikey")
         request.setValue("Stardrop", forHTTPHeaderField: "Application-Name")
-        request.setValue("1.10.4", forHTTPHeaderField: "Application-Version")
-        request.setValue("Stardrop/1.10.4 macOS", forHTTPHeaderField: "User-Agent")
+        request.setValue(AppVersion.current, forHTTPHeaderField: "Application-Version")
+        request.setValue("Stardrop/\(AppVersion.current) macOS", forHTTPHeaderField: "User-Agent")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         let payload = "{\"Version\":\"1.0.0\"}"

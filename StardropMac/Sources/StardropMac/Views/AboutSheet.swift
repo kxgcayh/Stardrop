@@ -6,11 +6,11 @@ public struct AboutSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     private var appVersion: String {
-        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.10.4"
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? AppVersion.current
     }
 
     private var buildNumber: String {
-        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1"
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? AppVersion.buildNumber
     }
 
     private var systemArch: String {

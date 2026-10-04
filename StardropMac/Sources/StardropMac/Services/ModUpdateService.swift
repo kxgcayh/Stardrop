@@ -122,8 +122,8 @@ public final class ModUpdateService {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Stardrop", forHTTPHeaderField: "Application-Name")
-        request.setValue("1.10.4", forHTTPHeaderField: "Application-Version")
-        request.setValue("Stardrop/1.10.4 macOS", forHTTPHeaderField: "User-Agent")
+        request.setValue(AppVersion.current, forHTTPHeaderField: "Application-Version")
+        request.setValue("Stardrop/\(AppVersion.current) macOS", forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 15
         request.httpBody = try JSONEncoder().encode(searchData)
 
